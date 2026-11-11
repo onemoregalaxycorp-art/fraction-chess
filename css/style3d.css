@@ -1,0 +1,96 @@
+/* FRACTION CHESS — 3D-поле боя (CSS 3D, без внешних библиотек) */
+:root { --cs3: 64px; --rx: 58deg; --rz: -45deg; --zoom: 1; --thick: 26px; }
+.view3d { --cs: var(--cs3); }
+.view3d .left { width: min(940px, calc(100vw - 490px)); min-width: 480px; }
+.viewlink { color: #fbbf24; margin-left: 12px; }
+
+/* ---- панель камеры ---- */
+#camctl { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 14px; }
+#camctl .grp { display: inline-flex; }
+#camctl .grp button { border-radius: 0; margin-left: -1px; padding: 6px 12px; }
+#camctl .grp button:first-child { border-radius: 8px 0 0 8px; }
+#camctl .grp button:last-child { border-radius: 0 8px 8px 0; }
+#camctl button.on { background: #b45309; border-color: #f59e0b; }
+#camctl .chk { margin: 0; }
+
+/* ---- сцена ---- */
+#stage {
+  position: relative; height: calc(100vh - 250px); min-height: 430px;
+  perspective: 1800px; perspective-origin: 50% 30%;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  border-radius: 14px; border: 1px solid #343c52;
+  background: radial-gradient(ellipse at 50% 35%, #33405f 0%, #161a26 55%, #0b0d13 100%);
+  user-select: none;
+}
+#cam {
+  transform-style: preserve-3d;
+  transform: scale(var(--zoom)) rotateX(var(--rx)) rotateZ(var(--rz));
+  transition: transform .8s cubic-bezier(.25, .8, .3, 1);
+}
+#table {
+  position: relative; transform-style: preserve-3d; padding: 20px;
+  background: linear-gradient(135deg, #6b4728, #3d2815 60%, #57391f);
+  box-shadow: inset 0 0 0 3px #2a1a0c, inset 0 0 22px #0008;
+}
+.tside { position: absolute; }
+.ts-s { left: 0; right: 0; bottom: 0; height: var(--thick); transform-origin: 50% 100%; transform: rotateX(90deg); background: linear-gradient(#4a301a, #23160a); }
+.ts-n { left: 0; right: 0; top: 0; height: var(--thick); transform-origin: 50% 0; transform: rotateX(-90deg); background: linear-gradient(#23160a, #4a301a); }
+.ts-e { top: 0; bottom: 0; right: 0; width: var(--thick); transform-origin: 100% 50%; transform: rotateY(-90deg); background: linear-gradient(90deg, #1d1208, #3d2815); }
+.ts-w { top: 0; bottom: 0; left: 0; width: var(--thick); transform-origin: 0 50%; transform: rotateY(90deg); background: linear-gradient(90deg, #3d2815, #1d1208); }
+
+.view3d #board { border: none; border-radius: 0; box-shadow: 0 0 0 2px #1d1208; transform-style: preserve-3d; transform: translateZ(1px); }
+.view3d .cell { transform-style: preserve-3d; }
+.view3d .cell.light { background: linear-gradient(135deg, #e6d6b3, #cdb88f); }
+.view3d .cell.dark { background: linear-gradient(135deg, #8f6c48, #6f5234); }
+.view3d .cell:hover { box-shadow: inset 0 0 0 200px #ffffff1a; }
+.view3d .cell.sel { box-shadow: inset 0 0 0 4px #facc15, inset 0 0 26px #facc1588; }
+.view3d .cell.sel-special { box-shadow: inset 0 0 0 4px #22d3ee, inset 0 0 26px #22d3ee99; }
+.view3d .cell .rk, .view3d .cell .fl { color: #0009; }
+
+/* подсветка лежит на доске, чуть выше подставки фигуры */
+.view3d .hl { transform: translateZ(7px); }
+.view3d .hl.k-special:not(.occ) { transform: translateZ(7px) rotate(45deg); }
+.view3d .hl.occ { inset: 6%; }
+.view3d .cell .cnt, .view3d .cell .curse { transform: translateZ(8px); }
+
+/* ---- миниатюры ---- */
+.unit { position: absolute; inset: 0; transform-style: preserve-3d; z-index: 2; }
+.ushadow { position: absolute; left: 12%; top: 12%; width: 76%; height: 76%; border-radius: 50%;
+  background: radial-gradient(closest-side, #000c, #0000); transform: translate3d(5px, 5px, .5px); }
+.ubase { position: absolute; left: 17%; top: 17%; width: 66%; height: 66%; border-radius: 50%;
+  border: 4px solid var(--fc); transform: translateZ(4px); box-shadow: 0 0 0 2px #0007; }
+.unit.o0 .ubase { background: radial-gradient(circle at 40% 35%, #f6f1e4, #b8ae98); }
+.unit.o1 .ubase { background: radial-gradient(circle at 40% 35%, #555b6c, #121419); }
+.ustand { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d;
+  transform: translateZ(4px) rotateZ(calc(var(--rz) * -1)) rotateX(-90deg);
+  transition: transform .8s cubic-bezier(.25, .8, .3, 1); }
+.ucard {
+  position: absolute; bottom: 0; left: calc(var(--cs3) * -.3); width: calc(var(--cs3) * .6); height: calc(var(--cs3) * .82);
+  border: 3px solid var(--fc); border-radius: 48% 48% 10% 10% / 34% 34% 8% 8%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; box-sizing: border-box;
+  box-shadow: inset 0 -10px 16px #0005, inset 0 6px 10px #fff3;
+}
+.unit.royal .ucard { height: calc(var(--cs3) * .98); }
+.unit.o0 .ucard { background: linear-gradient(170deg, #fffdf6, #d8cfbb 70%, #b3a88f); color: #1f2937; }
+.unit.o1 .ucard { background: linear-gradient(170deg, #5a6072, #23262f 70%, #101116); color: #f3f4f6; }
+.ucard .glyph { font-size: calc(var(--cs3) * .44); line-height: 1; font-family: "Segoe UI Symbol", "DejaVu Sans", serif; }
+.ucard .abbr { margin-top: 2px; background: var(--fc); color: #fff; font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 5px; text-shadow: 0 1px 1px #0008; }
+.ustand .st { position: absolute; bottom: calc(var(--cs3) * .86); left: -30px; width: 60px; text-align: center; font-size: 15px; }
+.unit.royal .ustand .st { bottom: calc(var(--cs3) * 1.02); }
+.ustand .st i { font-style: normal; }
+
+.unit.lifted .ustand { transform: translateZ(16px) rotateZ(calc(var(--rz) * -1)) rotateX(-90deg); }
+.unit.lifted .ubase { box-shadow: 0 0 0 3px #facc15, 0 0 18px #facc15; }
+.unit.threatened .ubase { animation: pulse3d 1s infinite; }
+@keyframes pulse3d { 50% { box-shadow: 0 0 0 5px #ef4444, 0 0 26px #ef4444; } }
+
+/* ---- анимация хода ---- */
+.unit.arrive { animation: arrive3d .45s cubic-bezier(.3, .7, .4, 1); }
+@keyframes arrive3d {
+  from { transform: translate3d(calc(var(--mx) * var(--cs3)), calc(var(--my) * var(--cs3)), 0); }
+  45% { transform: translate3d(calc(var(--mx) * var(--cs3) * .5), calc(var(--my) * var(--cs3) * .5), 30px); }
+  to { transform: none; }
+}
+.view3d .boom { position: absolute; inset: 8%; border-radius: 50%; border: 5px solid #f97316; pointer-events: none;
+  transform: translateZ(9px); animation: boom3d .7s ease-out forwards; }
+@keyframes boom3d { from { opacity: 1; transform: translateZ(9px) scale(.3); } to { opacity: 0; transform: translateZ(9px) scale(1.7); } }
