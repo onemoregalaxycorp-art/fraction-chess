@@ -42,7 +42,7 @@ let boardGroup, piecesGroup, hlGroup, fxGroup, pickPlane, hoverMark;
 const models = {};                 // путь → { scene, size }
 const pieces = new Map();          // id фигуры → { obj, x, y, type, owner, stat }
 const anims = [];                  // активные анимации
-let ready = false, pendingModel = null, lastTurn = null;
+let ready = false, pendingModel = null, lastTurn = null, lastGame = null;
 
 /* ---------- старт ---------- */
 function init() {
@@ -107,7 +107,7 @@ function resize() {
   const host = renderer.domElement.parentElement;
   const w = host.clientWidth, h = host.clientHeight;
   renderer.setSize(w, h, false); camera.aspect = w / h;
-  camera.fov = camera.aspect > 1.4 ? 38 + Math.min(10, (camera.aspect - 1.4) * 20) : 38;   // широкий низкий экран (телефон) — шире угол, чтобы доска влезла по высоте
+  camera.fov = camera.aspect > 1.4 ? 38 + Math.min(6, (camera.aspect - 1.4) * 12) : 38;   // широкий низкий экран (телефон) — шире угол, чтобы доска влезла по высоте
   camera.updateProjectionMatrix();
 }
 
@@ -319,7 +319,9 @@ function render(model) {
     const f = cellFrame(model.sel.mode === 'special' ? 0x22d3ee : 0xfacc15, 1);
     const pos = cellPos(model.sel.x, model.sel.y); f.position.x = pos.x; f.position.z = pos.z; hlGroup.add(f);
   }
-  if (model.turn !== lastTurn) { lastTurn = model.turn; setView(); }
+  // новая партия — показать поле со своей стороны; смена хода — поворот только в режиме «к игроку»
+  if (model.game !== lastGame) { lastGame = model.game; lastTurn = model.turn; rot = 0; setView(); }
+  else if (model.turn !== lastTurn) { lastTurn = model.turn; if (camMode === 'turn') setView(); }
 }
 function boom(pos) {
   const r = flat(new THREE.RingGeometry(0.3, 0.42, 40), new THREE.MeshBasicMaterial({ color: 0xf97316, transparent: true, depthWrite: false, side: THREE.DoubleSide }), 0.06);
@@ -419,17 +421,23 @@ function bindInput() {
 
 /* ---------- камера ---------- */
 const PRESETS = { iso: { polar: 0.95, az: Math.PI / 4, dist: 14 }, angled: { polar: 0.72, az: 0, dist: 13 }, top: { polar: 0.02, az: 0, dist: 15 } };
-let preset = 'iso', rot = 0, follow = true, tween = null;
+/* Режимы камеры: 'free' — остаётся там, куда её повернул игрок (по умолчанию);
+   'turn' — после каждого хода поворачивается к стороне ходящего (против компьютера — к человеку). */
+const readMode = () => { try { return localStorage.getItem('fc.cam') === 'turn' ? 'turn' : 'free'; } catch (e) { return 'free'; } };
+let preset = 'iso', rot = 0, camMode = readMode(), tween = null;
 function viewSide() {
   const G = FC.UI.G, ai = FC.UI.ai || [false, false];
-  if (!follow || !G) return 0;
-  if (ai[0] !== ai[1]) return ai[0] ? 1 : 0;
-  return G.turn;
+  if (!G) return 0;
+  if (ai[0] !== ai[1]) return ai[0] ? 1 : 0;   // против компьютера — всегда со стороны человека
+  return camMode === 'turn' ? G.turn : 0;
 }
-function setView(instant) {
+// opts: { instant, keepAz } — keepAz: не менять поворот (свободная камера), только наклон и расстояние
+function setView(instant, keepAz) {
   const p = PRESETS[preset];
-  const goal = { polar: p.polar, az: p.az + rot + viewSide() * Math.PI, dist: p.dist };
   const sph = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
+  const az = keepAz && camera.position.lengthSq() ? sph.theta + rot : p.az + rot + viewSide() * Math.PI;
+  rot = keepAz ? 0 : rot;
+  const goal = { polar: p.polar, az, dist: p.dist };
   if (instant || !camera.position.lengthSq()) {
     camera.position.setFromSpherical(new THREE.Spherical(goal.dist, goal.polar, goal.az)); return;
   }
@@ -443,24 +451,31 @@ function camTween(dt) {
   if (k >= 1) tween = null;
 }
 function bindCameraUI() {
-  for (const b of document.querySelectorAll('#camctl [data-preset]')) b.onclick = () => {
-    preset = b.dataset.preset; rot = 0;
-    for (const o of document.querySelectorAll('#camctl [data-preset]')) o.classList.toggle('on', o === b);
-    setView();
+  const presetBtns = document.querySelectorAll('#views [data-preset]');
+  for (const b of presetBtns) b.onclick = () => {
+    preset = b.dataset.preset;
+    for (const o of presetBtns) o.classList.toggle('on', o === b);
+    if (camMode === 'free') setView(false, true); else { rot = 0; setView(); }
   };
-  const turn = d => { rot += d; setView(); };
-  const zoom = f => { const p = PRESETS[preset]; p.dist = Math.min(24, Math.max(6, p.dist * f)); setView(); };
-  document.getElementById('rotL').onclick = () => turn(-Math.PI / 2);
-  document.getElementById('rotR').onclick = () => turn(Math.PI / 2);
-  document.getElementById('zoomIn').onclick = () => zoom(1 / 1.15);
-  document.getElementById('zoomOut').onclick = () => zoom(1.15);
-  document.getElementById('follow').onchange = e => { follow = e.target.checked; setView(); };
+  const turn = d => { if (camMode === 'free') { rot = d; setView(false, true); } else { rot += d; setView(); } };
+  const zoom = f => { const p = PRESETS[preset]; p.dist = Math.min(24, Math.max(6, p.dist * f)); setView(false, camMode === 'free'); };
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+  on('rotL', () => turn(-Math.PI / 2));
+  on('rotR', () => turn(Math.PI / 2));
+  for (const r of document.querySelectorAll('input[name="cammode"]')) {
+    r.checked = r.value === camMode;
+    r.onchange = () => {
+      camMode = r.value;
+      try { localStorage.setItem('fc.cam', camMode); } catch (e) { }
+      rot = 0; setView();                 // сразу показать поле со стороны нужного игрока
+    };
+  }
   document.addEventListener('keydown', e => {
     if (e.ctrlKey || e.altKey || /INPUT|SELECT/.test(e.target.tagName)) return;
     const k = e.key.toLowerCase();
     if (k === 'q' || k === 'й') turn(-Math.PI / 2); else if (k === 'e' || k === 'у') turn(Math.PI / 2);
     else if (k === '+' || k === '=') zoom(1 / 1.15); else if (k === '-') zoom(1.15);
-    else if ('123'.includes(k) && k) document.querySelectorAll('#camctl [data-preset]')[+k - 1].click();
+    else if ('123'.includes(k) && k) presetBtns[+k - 1].click();
   });
 }
 

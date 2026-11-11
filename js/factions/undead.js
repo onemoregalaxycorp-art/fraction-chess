@@ -58,11 +58,11 @@
     normal(c) { c.leap(FC.ALL8, { capture: false }); },
     special(c) {
       const o = c.p.owner;
+      const sk = skeletons(c.G, o);
+      if (sk >= SKELETON_LIMIT) c.warn(`Нельзя призвать больше ${SKELETON_LIMIT} Скелетов: на доске уже ${sk}. Воскрешение из пула по-прежнему доступно.`);
       const cells = [[0, 1], [-1, 1], [1, 1]].map(([dx, dy]) => c.rel(dx, dy)).filter(([x, y]) => c.empty(x, y));
       if (!cells.length) { c.note('Все три клетки перед Кладбищем заняты — призыв и воскрешение невозможны.'); return; }
-      const sk = skeletons(c.G, o);
-      if (sk >= SKELETON_LIMIT) c.note(`На доске уже ${sk} Скелетов — больше ${SKELETON_LIMIT} призывать нельзя (воскрешение из пула доступно).`);
-      else for (const [x, y] of cells)
+      if (sk < SKELETON_LIMIT) for (const [x, y] of cells)
         c.add('summon', x, y, `Призвать Скелета (на доске ${sk}/${SKELETON_LIMIT})`, g => { g.spawn('skeleton', o, x, y, { summoned: true, moved: true }); g.log(`Кладбище призывает Скелета на ${FC.sq(x, y)}`); });
       const pool = [...new Set(c.G.players[o].pool)];
       if (!pool.length) c.note('Пул воскрешения пуст.');
@@ -143,7 +143,7 @@
             if (qd.royal) c.note('Лидера противника превращать нельзя.');
             else if (qd.cls === 'queen') c.note('Превращение ферзя — отдельная механика (не утверждена в GDD).');
             else if (FC.UNDEAD_MAP[qd.cls] === 'skeleton' && skeletons(G, p.owner) >= SKELETON_LIMIT)
-              c.note(`На доске уже ${SKELETON_LIMIT} Скелетов — превращать пешки в Скелетов нельзя (остальные фигуры — можно).`);
+              c.warn(`Нельзя получить больше ${SKELETON_LIMIT} Скелетов: пешки сейчас не превращаются (остальные фигуры — можно).`);
             else {
               const nt = FC.UNDEAD_MAP[qd.cls], bx = fx + dx * (k - 1), by = fy + dy * (k - 1);
               c.add('convert', tx, ty, `Превратить в «${FC.PIECES[nt].name}»`, g => {

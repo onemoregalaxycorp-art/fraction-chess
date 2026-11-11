@@ -1,0 +1,106 @@
+/* Поле боя на весь экран + интерфейс поверх (HUD) */
+body.viewgl #game:not(.hidden) { position: fixed; inset: 0; display: block; padding: 0; gap: 0; overflow: hidden; }
+body.viewgl #stage { position: absolute; inset: 0; height: auto; min-height: 0; border: 0; border-radius: 0; }
+
+:root { --hud-bg: rgba(12, 15, 24, 0.82); --hud-line: rgba(120, 140, 190, 0.35); --hud-glow: #22d3ee;
+  --safe-l: max(10px, env(safe-area-inset-left)); --safe-r: max(10px, env(safe-area-inset-right)); }
+
+.hudbtn, .vbtn { width: 44px; height: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--hud-bg); border: 1px solid var(--hud-line); border-radius: 10px; color: #e5e7eb;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); box-shadow: 0 4px 14px #0008; }
+.hudbtn svg, .vbtn svg, .eye svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.hudbtn:hover, .vbtn:hover { border-color: #94a3b8; }
+.hudpanel { position: absolute; z-index: 20; background: rgba(14, 18, 29, 0.94); border: 1px solid var(--hud-line); border-radius: 12px;
+  box-shadow: 0 12px 40px #000c; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+
+/* --- слева вверху: меню --- */
+#hudTL { position: absolute; left: var(--safe-l); top: 10px; z-index: 15; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-height: calc(100% - 90px); }
+#menuBtn.open { border-color: #fbbf24; color: #fbbf24; }
+#menu { left: var(--safe-l); top: 60px; width: 270px; padding: 8px; display: flex; flex-direction: column; gap: 5px; max-height: calc(100% - 80px); overflow-y: auto; }
+#menu .mi { text-align: left; padding: 8px 10px; font-size: 14px; background: #1c2233; border-color: #2e3750; }
+#menu .mi:hover:not(:disabled) { background: #263049; }
+#menu .mi:disabled { opacity: .4; cursor: default; }
+#menu .mrow { display: flex; gap: 5px; }
+#menu .mrow .mi { flex: 1; }
+#menu .mrow .eye { flex: none; width: 42px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+#menu .eye.on { color: var(--hud-glow); border-color: var(--hud-glow); box-shadow: 0 0 10px #22d3ee66; }
+#menu .msec { margin: 6px 2px 0; font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+#menu .mopt { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: #cbd5e1; padding: 4px 4px; cursor: pointer; line-height: 1.3; }
+#menu .mopt input { margin-top: 2px; accent-color: #f59e0b; }
+
+/* журнал слева под кнопкой меню */
+#logDock { width: 250px; max-height: 38vh; display: flex; flex-direction: column; background: rgba(10, 13, 20, 0.7); border: 1px solid var(--hud-line);
+  border-radius: 10px; overflow: hidden; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+#logDock .dockHead { font-size: 11px; color: #94a3b8; padding: 5px 9px 3px; text-transform: uppercase; letter-spacing: 1px; }
+#logDock #log { overflow-y: auto; padding: 0 9px 6px; font: 11.5px/1.35 Consolas, monospace; color: #cbd5e1; }
+#logDock #log div { padding: 2px 0; border-bottom: 1px solid #ffffff10; }
+#logDock #log div:first-child { color: #fde68a; }
+
+/* --- сверху по центру: виды + состояние --- */
+#hudTC { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 12; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  width: min(640px, calc(100% - 140px)); pointer-events: none; }
+#hudTC > * { pointer-events: auto; }
+#views { display: flex; gap: 8px; }
+.vbtn.on { color: #fbbf24; border-color: #f59e0b; box-shadow: 0 0 0 1px #f59e0b55, 0 0 14px #f59e0b44; }
+#banner { min-height: 0; padding: 5px 12px; font-size: 13px; text-align: center; background: var(--hud-bg); border: 1px solid var(--hud-line);
+  border-radius: 999px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); max-width: 100%; }
+#toast { padding: 8px 14px; border-radius: 10px; background: #3f1414f0; border: 1px solid #f87171; color: #fee2e2; font-size: 13.5px; font-weight: 600;
+  text-align: center; box-shadow: 0 6px 24px #000a, 0 0 18px #ef444455; animation: toastIn .25s ease-out; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+/* --- справа вверху: карточка фигуры --- */
+#pieceBtn { position: absolute; right: var(--safe-r); top: 10px; z-index: 15; color: var(--hud-glow); border-color: var(--hud-glow);
+  box-shadow: 0 0 0 1px #22d3ee55, 0 0 16px #22d3ee88; animation: glowPulse 1.6s ease-in-out infinite; }
+#pieceBtn.open { animation: none; background: #0e3a44; }
+@keyframes glowPulse { 0%, 100% { box-shadow: 0 0 0 1px #22d3ee55, 0 0 8px #22d3ee55; } 50% { box-shadow: 0 0 0 1px #22d3eeaa, 0 0 22px #22d3eecc; } }
+#piecePanel { right: var(--safe-r); top: 60px; width: 330px; max-height: calc(100% - 80px); overflow-y: auto; padding: 12px 14px; }
+#piecePanel .xbtn { position: absolute; right: 8px; top: 8px; width: 28px; height: 28px; padding: 0; border-radius: 8px; background: transparent; border-color: transparent; color: #94a3b8; }
+#piecePanel h3 { margin: 0 30px 2px 0; }
+#piecePanel .rules { font-size: 13px; padding-left: 16px; }
+#piecePanel #legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: #94a3b8; margin-top: 10px; padding-top: 8px; border-top: 1px solid #ffffff14; }
+#piecePanel #legend .sw { width: 10px; height: 10px; }
+
+/* неоновая схема ходов */
+.neon { margin: 10px auto 4px; width: max-content; padding: 8px; border-radius: 10px; background: radial-gradient(circle at 50% 50%, #0d1b2e, #05080f 75%);
+  border: 1px solid #22d3ee55; box-shadow: 0 0 18px #22d3ee33, inset 0 0 24px #22d3ee14; }
+.neon .dia { grid-template-columns: repeat(8, 24px); grid-template-rows: repeat(8, 24px); border: 0; gap: 1px; background: transparent; }
+.neon .dc { border-radius: 3px; }
+.neon .dc.light { background: #0f1a2b; } .neon .dc.dark { background: #0a1220; }
+.neon .dc { box-shadow: inset 0 0 0 1px #22d3ee14; }
+.neon .dm { width: 9px; height: 9px; box-shadow: 0 0 6px currentColor, 0 0 12px currentColor; }
+.neon .dm.m-move { background: #4ade80; color: #4ade80; }
+.neon .dm.m-summon { background: #c084fc; color: #c084fc; }
+.neon .dm.m-special { background: #60a5fa; color: #60a5fa; }
+.neon .da { inset: 3px; border-width: 2px; box-shadow: 0 0 6px currentColor, inset 0 0 4px currentColor; }
+.neon .da.a-capture { border-color: #f87171; color: #f87171; }
+.neon .da.a-ranged { border-color: #fb923c; color: #fb923c; }
+.neon .da.a-convert { border-color: #c084fc; color: #c084fc; }
+.neon .piece.mini { background: #0b1220; border-color: #fbbf24; box-shadow: 0 0 10px #fbbf24aa; }
+.neon .piece.mini .glyph { color: #fde68a; text-shadow: 0 0 6px #fbbf24; }
+.neon-cap { text-align: center; font-size: 11px; color: #67e8f9; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+
+.fullLog { margin-top: 8px; max-height: 60vh; overflow-y: auto; font: 12.5px/1.4 Consolas, monospace; color: #cbd5e1; }
+.fullLog div { padding: 2px 0; border-bottom: 1px solid #262c3d; }
+
+/* --- снизу слева: игроки --- */
+#players { position: absolute; left: var(--safe-l); bottom: 10px; z-index: 10; flex-direction: column; gap: 5px; width: 260px; }
+#players .pcard2 { background: var(--hud-bg); font-size: 11.5px; padding: 5px 9px; border-radius: 8px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+#players .pcard2 .ph { margin-bottom: 1px; }
+
+/* телефон / низкий экран */
+@media (max-height: 560px) {
+  .hudbtn, .vbtn { width: 38px; height: 38px; border-radius: 9px; }
+  .hudbtn svg, .vbtn svg { width: 19px; height: 19px; }
+  #hudTL, #hudTC, #pieceBtn { top: 6px; }
+  #menu, #piecePanel { top: 50px; max-height: calc(100% - 58px); }
+  #piecePanel { width: 300px; padding: 10px 12px; }
+  .neon .dia { grid-template-columns: repeat(8, 19px); grid-template-rows: repeat(8, 19px); }
+  #banner { font-size: 11.5px; padding: 3px 10px; }
+  #toast { font-size: 12px; padding: 6px 10px; }
+  #logDock { width: 200px; max-height: 42vh; }
+  #players { width: 210px; bottom: 6px; gap: 3px; cursor: pointer; }
+  #players .pcard2 { font-size: 10.5px; padding: 3px 7px; }
+  #players:not(.expanded) .pcard2 > div:not(.ph):not(.warn) { display: none; }   /* нажатие — показать подробности */
+  #menu { width: 250px; }
+  #menu .mi { padding: 6px 9px; font-size: 13px; }
+}

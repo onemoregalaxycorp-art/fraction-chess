@@ -6,9 +6,11 @@
   let threatCache = { key: '', val: [false, false] };
 
   const ASSUMPTIONS = [
-    'Шах: лидер (Король, Шаман, Призыватель, Филактерий) не может ходить под удар, и нельзя оставлять его под ударом. Мат — поражение, пат — ничья.',
+    'Шах: лидер (Король, Шаман, Филактерий) не может ходить под удар, и нельзя оставлять его под ударом. Мат — поражение, пат — ничья.',
     'Ничья: если одна и та же позиция повторилась 3 раза, или прошло 50 ходов каждой стороны без единого взятия (превращение Личем тоже считается взятием). Счётчики появляются вверху, когда ничья близко.',
-    'Король демонов — не лидер, поэтому может вставать на атакованные клетки.',
+    'У Демонов нет шаха и мата: Призыватель и Король демонов могут стоять и ходить под удар. Демоны проигрывают, только если Призывателя взяли или он не может возродить Короля демонов (рядом нет жертвы).',
+    'Импы появляются у ближайшего Обелиска, когда любая фигура Демонов, кроме Импа, берёт вражескую фигуру.',
+    'Нежить: на доске не больше 12 Скелетов — при попытке призвать больше вверху появится предупреждение.',
     'После гибели Короля демонов следующий ход Демонов уходит на жертвоприношение (2-е нажатие на Призывателя). Нет жертвы — поражение.',
     'У каждой фигуры Демонов свой похищенный ход (🎭 на фигуре).',
     'Орк-воин, Вождь, Хоп-гоблин и Шаман едят две фигуры подряд, если те стоят вплотную друг к другу; у Гоблина, Плута и Всадника этого нет. Дальность Орка-воина — 4 клетки.',
@@ -28,14 +30,15 @@
       descFaction(i);
     }
     $('startBtn').onclick = startGame;
-    $('newGame').onclick = () => modal('Начать новую игру?', [{ label: 'Да', fn: toSetup }, { label: 'Отмена' }]);
-    $('rulesBtn').onclick = () => modal('<b>Правила прототипа</b><ul>' + ASSUMPTIONS.map(a => `<li>${a}</li>`).join('') + '</ul>', [{ label: 'Понятно' }]);
+    $('newGame').onclick = () => { closeMenu(); modal('Начать новую игру?', [{ label: 'Да', fn: toSetup }, { label: 'Отмена' }]); };
+    $('rulesBtn').onclick = () => { closeMenu(); modal('<b>Правила прототипа</b><ul>' + ASSUMPTIONS.map(a => `<li>${a}</li>`).join('') + '</ul>', [{ label: 'Понятно' }]); };
     $('undoBtn').onclick = undo;
     $('redoBtn').onclick = redo;
-    for (const b of document.querySelectorAll('.cardsBtn')) b.onclick = openCards;
+    for (const b of document.querySelectorAll('.cardsBtn')) b.onclick = () => { closeMenu(); openCards(); };
     $('cardsClose').onclick = () => $('cards').classList.add('hidden');
+    initHud();
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { $('cards').classList.add('hidden'); }
+      if (e.key === 'Escape') { $('cards').classList.add('hidden'); closeMenu(); setPanel(false); }
       const k = e.key.toLowerCase();
       if (e.ctrlKey && (k === 'y' || k === 'н' || (e.shiftKey && (k === 'z' || k === 'я')))) { e.preventDefault(); redo(); }
       else if (e.ctrlKey && (k === 'z' || k === 'я')) { e.preventDefault(); undo(); }
@@ -47,15 +50,67 @@
       b.addEventListener('mouseleave', () => $('tip').classList.add('hidden'));
       b.addEventListener('contextmenu', e => { e.preventDefault(); sel = null; ctx = null; render(); });
     }
-    renderLegend();
+    if ($('legend')) renderLegend();
   }
+
+  /* ---------- HUD WebGL-страницы: меню, журнал, карточка фигуры, предупреждения ---------- */
+  const store = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { } } };
+  let swallowUntil = 0;
+  function closeMenu() { if ($('menu')) { $('menu').classList.add('hidden'); $('menuBtn').classList.remove('open'); } }
+  function setPanel(open) {
+    if (!$('piecePanel')) return;
+    $('piecePanel').classList.toggle('hidden', !open);
+    $('pieceBtn').classList.toggle('open', !!open);
+  }
+  function setDock(on) {
+    if (!$('logDock')) return;
+    $('logDock').classList.toggle('hidden', !on);
+    $('logEye').classList.toggle('on', on);
+    store.set('fc.logDock', on ? '1' : '0');
+  }
+  function initHud() {
+    if (!$('menuBtn')) return;
+    $('menuBtn').onclick = e => {
+      e.stopPropagation();
+      const open = $('menu').classList.contains('hidden');
+      $('menu').classList.toggle('hidden', !open); $('menuBtn').classList.toggle('open', open);
+      if (open) setPanel(false);
+    };
+    $('menu').addEventListener('click', e => e.stopPropagation());
+    document.addEventListener('pointerdown', e => {          // нажатие мимо меню — закрыть его
+      if (!$('menu').classList.contains('hidden') && !e.target.closest('#menu, #menuBtn')) {
+        closeMenu();
+        swallowUntil = performance.now() + 600;          // это нажатие только закрывает меню, по доске не срабатывает
+      }
+    });
+    $('logBtn').onclick = () => {
+      closeMenu();
+      modal('<b>Журнал ходов</b><div class="fullLog">' + (G ? G.logs.slice().reverse().map(l => `<div>${l}</div>`).join('') : '') + '</div>', [{ label: 'Закрыть' }]);
+    };
+    $('logEye').onclick = () => setDock($('logDock').classList.contains('hidden'));
+    setDock(store.get('fc.logDock') === '1');
+    $('pieceBtn').onclick = () => { closeMenu(); setPanel($('piecePanel').classList.contains('hidden')); };
+    $('pieceClose').onclick = () => setPanel(false);
+    $('players').onclick = () => $('players').classList.toggle('expanded');
+  }
+  let toastTimer = 0;
+  function toast(msg) {
+    const t = $('toast');
+    if (!t) return;
+    t.textContent = '⚠ ' + msg; t.classList.remove('hidden');
+    t.style.animation = 'none'; void t.offsetWidth; t.style.animation = '';
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 4000);
+  }
+  const diaCache = {};
+  const neonDiagram = type => diaCache[type] || (diaCache[type] = `<div class="neon">${diagram(type)}<div class="neon-cap">схема ходов</div></div>`);
+
   function descFaction(i) {
     const F = FC.FACTIONS[$('f' + i).value];
     const types = [...new Set(F.back.concat(F.pawn))].map(t => FC.PIECES[t].name);
     $('fd' + i).innerHTML = `<p>${F.desc}</p><p class="small">${types.join(' · ')}</p>`;
     $('fd' + i).style.borderColor = F.color;
   }
-  function toSetup() { G = null; busy = false; $('game').classList.add('hidden'); $('setup').classList.remove('hidden'); }
+  function toSetup() { G = null; busy = false; sel = null; ctx = null; closeMenu(); setPanel(false); if ($('pieceBtn')) $('pieceBtn').classList.add('hidden'); $('game').classList.add('hidden'); $('setup').classList.remove('hidden'); }
 
   function startGame() {
     G = new FC.Game($('f0').value, $('f1').value);
@@ -88,11 +143,15 @@
     if (sel.own) {
       ctx = G.legalActionsFor(x, y, mode);
       ctx.ghost = [];
+      const warns = (ctx.warns || []).slice();
       if (mode === 'normal') {
         // особые действия видны и кликабельны уже при 1-м нажатии (тусклыми маркерами)
-        ctx.ghost = G.legalActionsFor(x, y, 'special').acts;
+        const sp = G.legalActionsFor(x, y, 'special');
+        ctx.ghost = sp.acts;
         specialHint = ctx.ghost.length;
+        for (const w of (sp.warns || [])) if (!warns.includes(w)) warns.push(w);
       }
+      if (warns.length) toast(warns[0]);
     } else {
       ctx = { acts: [], obstacles: [], notes: ['Сейчас ход соперника — ходы этой фигуры не показываются.'] };
     }
@@ -269,7 +328,7 @@
           hl: map[key] ? hlFor(map[key]) : null, block: obst.has(key), boom: hits.has(key)
         });
       }
-      if (FC.GL) FC.GL.render({ cells, sel, mover, turn: G.turn });
+      if (FC.GL) FC.GL.render({ cells, sel, mover, turn: G.turn, game: G });
       return;
     }
     for (let y = 7; y >= 0; y--) for (let x = 0; x < 8; x++) {
@@ -346,7 +405,12 @@
   }
   function renderInfo() {
     const el = $('info');
-    if (!sel || !G.at(sel.x, sel.y)) {
+    const hasSel = !!(sel && G.at(sel.x, sel.y));
+    if ($('pieceBtn')) {                     // WebGL-страница: кнопка карточки загорается при выборе фигуры
+      $('pieceBtn').classList.toggle('hidden', !hasSel);
+      if (!hasSel) setPanel(false);
+    }
+    if (!hasSel) {
       el.innerHTML = '<h3>Фигура</h3><p class="muted">Нажмите на свою фигуру: 1-е нажатие — обычные ходы, 2-е — особые способности. ' + (matchMedia('(pointer: coarse)').matches
         ? 'Нажмите на подсвеченную клетку, чтобы сделать ход. Нажатие мимо доски — снять выбор. Палец — вращать камеру, щипок — масштаб.'
         : 'Наведите на подсвеченную клетку, чтобы увидеть действие. Правый клик — снять выбор.') + '</p>';
@@ -376,6 +440,7 @@
       <div class="muted">${F.name} · ${FC.COLOR_NAME[p.owner]} · замена: ${FC.CLASS_NAME[d.cls]} · ${FC.sq(sel.x, sel.y)}</div>
       ${st.length ? `<div class="stl">${st.join(' · ')}</div>` : ''}
       <ul class="rules">${d.rules.map(r => `<li>${r}</li>`).join('')}</ul>
+      ${$('pieceBtn') ? neonDiagram(p.type) : ''}
       ${sel.own ? `<div class="mode ${sel.mode}">${modeT}</div>
       <div>${Object.keys(counts).map(k => `<span class="tag k-${k}">${FC.KINDS[k]}: ${counts[k]}</span>`).join(' ') || '<span class="muted">Нет доступных действий.</span>'}</div>` : ''}
       ${notes.map(n => `<div class="note">${n}</div>`).join('')}
@@ -479,7 +544,7 @@
   FC.UI = {
     get G() { return G; }, get ai() { return ai; }, onRender: null,
     // для WebGL-поля: клик, наведение и снятие выбора по координатам клетки
-    click: (x, y) => onCell(x, y),
+    click: (x, y) => { if (performance.now() < swallowUntil) return; onCell(x, y); },
     hover: (x, y, cx, cy) => hoverAt(x, y, cx, cy),
     deselect: () => { sel = null; ctx = null; if (G) render(); }
   };

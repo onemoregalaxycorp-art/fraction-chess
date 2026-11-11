@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/style3d.css">
   <link rel="stylesheet" href="css/gl.css">
+  <link rel="stylesheet" href="css/hud.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
 <body class="view3d viewgl">
@@ -51,23 +52,42 @@
   </div>
 
   <div id="game" class="hidden">
-    <div class="left">
-      <div id="banner"></div>
-      <div id="camctl">
-        <span class="grp"><button data-preset="iso" class="on">Изометрия</button><button data-preset="angled">Под углом</button><button data-preset="top">Сверху</button></span>
-        <span class="grp"><button id="rotL" title="Повернуть камеру (Q)">⟲</button><button id="rotR" title="Повернуть камеру (E)">⟳</button></span>
-        <span class="grp"><button id="zoomOut" title="Отдалить (−)">−</button><button id="zoomIn" title="Приблизить (+)">+</button></span>
-        <label class="chk"><input type="checkbox" id="follow" checked> Камера за игроком</label>
+    <div id="stage"><div id="glhost"></div><div id="glstatus">Загрузка 3D-моделей…</div></div>
+
+    <!-- слева вверху: меню и журнал -->
+    <div id="hudTL">
+      <button id="menuBtn" class="hudbtn" title="Меню" aria-label="Меню"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <div id="logDock" class="hidden"><div class="dockHead">Журнал ходов</div><div id="log"></div></div>
+    </div>
+    <div id="menu" class="hudpanel hidden">
+      <button class="cardsBtn mi">📖 Справочник фигур</button>
+      <button id="rulesBtn" class="mi">📜 Правила</button>
+      <button id="newGame" class="mi">⟲ Новая игра</button>
+      <div class="mrow"><button id="undoBtn" class="mi" title="Ctrl+Z">↶ Ход назад</button><button id="redoBtn" class="mi" title="Ctrl+Y">↷ Ход вперёд</button></div>
+      <div class="mrow"><button id="logBtn" class="mi">📋 Журнал ходов</button><button id="logEye" class="mi eye" title="Показывать журнал слева на экране" aria-label="Показывать журнал на экране"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+      <div class="msec">Камера</div>
+      <label class="mopt"><input type="radio" name="cammode" value="free"> Свободная — остаётся, как вы её повернули</label>
+      <label class="mopt"><input type="radio" name="cammode" value="turn"> Поворот к игроку после каждого хода</label>
+      <div class="mrow"><button id="rotL" class="mi" title="Повернуть (Q)">⟲ Повернуть</button><button id="rotR" class="mi" title="Повернуть (E)">Повернуть ⟳</button></div>
+    </div>
+
+    <!-- сверху по центру: виды камеры и строка состояния -->
+    <div id="hudTC">
+      <div id="views">
+        <button data-preset="iso" class="vbtn on" title="Изометрия (1)" aria-label="Изометрия"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg></button>
+        <button data-preset="angled" class="vbtn" title="Под углом (2)" aria-label="Под углом"><svg viewBox="0 0 24 24"><path d="M7 6h10l4 13H3z"/><path d="M12 6v13M5 12.5h14"/></svg></button>
+        <button data-preset="top" class="vbtn" title="Сверху (3)" aria-label="Сверху"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><path d="M12 4v16M4 12h16"/></svg></button>
       </div>
-      <div id="stage"><div id="glhost"></div><div id="glstatus">Загрузка 3D-моделей…</div></div>
-      <div id="legend"></div>
+      <div id="banner"></div>
+      <div id="toast" class="hidden"></div>
     </div>
-    <div class="right">
-      <div id="players"></div>
-      <div class="panel"><div id="info"></div></div>
-      <div class="panel logp"><h3>Журнал</h3><div id="log"></div></div>
-      <div class="btns"><button id="undoBtn" title="Ctrl+Z">↶ Ход назад</button><button id="redoBtn" title="Ctrl+Y">↷ Ход вперёд</button><button class="cardsBtn">📖 Справочник фигур</button><button id="rulesBtn">Правила</button><button id="newGame">Новая игра</button></div>
-    </div>
+
+    <!-- справа вверху: карточка выбранной фигуры -->
+    <button id="pieceBtn" class="hudbtn hidden" title="Описание фигуры" aria-label="Описание фигуры"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>
+    <div id="piecePanel" class="hudpanel hidden"><button id="pieceClose" class="xbtn" aria-label="Закрыть">✕</button><div id="info"></div><div id="legend"></div></div>
+
+    <!-- снизу слева: игроки -->
+    <div id="players"></div>
   </div>
 
   <div id="cards" class="hidden">

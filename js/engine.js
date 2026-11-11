@@ -41,6 +41,7 @@
       this.acts.push(a); return a;
     }
     note(t) { if (!this.notes.includes(t)) this.notes.push(t); }
+    warn(t) { this.note(t); (this.warns = this.warns || []).includes(t) || this.warns.push(t); }   // заметное предупреждение вверху экрана
     block(x, y, why) { if (this.G.inB(x, y)) this.obstacles.push([x, y]); if (why) this.note(why); }
     empty(x, y) { return this.G.empty(x, y); }
     cap(x, y) { return this.G.canCapture(this.p, this.G.at(x, y)); }
@@ -297,6 +298,7 @@
       return res;
     }
     leaderThreatened(owner) {
+      if (this.faction(owner).noCheck) return false;   // Демоны: шаха и мата нет вообще
       const r = this.leader(owner);
       return !!r && this.threatSquares(1 - owner).has(r.x + ',' + r.y);
     }
@@ -374,15 +376,15 @@
             if (t && vd.cls !== 'pawn') { bp.pool.push(t); this.log(`В пул воскрешения добавлен «${FC.PIECES[t].name}»`); }
           }
         }
-        // Демоны: похищение хода или призыв Импа
+        // Демоны: похищение хода (Страж и Пожиратель врагов не «обкрадывают») и призыв Импа
         if (bd.faction === 'demons') {
-          if (bd.summonImp && v.owner !== by.owner) this.queue.push(this.impSummonBuilder(by.owner, g => g.find(by.id), ''));
-          else this.stealMove(by, v.type);
+          const enemy = v.owner !== by.owner;
+          if (!(bd.summonImp && enemy)) this.stealMove(by, v.type);
+          // взяв вражескую фигуру любой фигурой, кроме Импа, Демоны призывают Импа у ближайшего к месту взятия Обелиска
+          if (enemy && by.type !== 'imp' && this.faction(by.owner).impOnKill)
+            this.queue.push(this.impSummonBuilder(by.owner, () => ({ x, y }), `«${bd.name}» взял врага — `));
         }
         if (bd.bloodlust && vd.cls === 'pawn') { by.bloodlust = 2; this.log(`${this.who(by)} впадает в Кровожадность`); }
-        // Демоны: за каждую фигуру, взятую врагом, у ближайшего к месту взятия Обелиска появляется Имп
-        if (this.faction(v.owner).impOnLoss && by.owner !== v.owner)
-          this.queue.push(this.impSummonBuilder(v.owner, () => ({ x, y }), `«${vd.name}» пал — `));
       }
       if (v.type === 'demon_king' && this.leader(v.owner)) {
         this.players[v.owner].reviveDue = true;

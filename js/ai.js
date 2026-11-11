@@ -36,6 +36,11 @@
         const f = G.find(pid);
         if (f && T.has(f.x + ',' + f.y) && !md.royal) s -= mv * 0.85;
         else if (wasAttacked && !md.royal) s += mv * 0.4;
+        // без правила шаха (Демоны) лидера можно подставить — не оставлять его под ударом
+        if (G.faction(owner).noCheck && G.winner == null) {
+          const l = G.leader(owner);
+          if (l && T.has(l.x + ',' + l.y)) s -= 900;
+        }
         if (G.leaderThreatened(opp)) {
           s += 1.5;
           if (G.allActions(opp).length === 0) s += 10000;   // мат в один ход
