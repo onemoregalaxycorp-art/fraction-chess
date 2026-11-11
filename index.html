@@ -65,10 +65,47 @@
       <button id="newGame" class="mi">⟲ Новая игра</button>
       <div class="mrow"><button id="undoBtn" class="mi" title="Ctrl+Z">↶ Ход назад</button><button id="redoBtn" class="mi" title="Ctrl+Y">↷ Ход вперёд</button></div>
       <div class="mrow"><button id="logBtn" class="mi">📋 Журнал ходов</button><button id="logEye" class="mi eye" title="Показывать журнал слева на экране" aria-label="Показывать журнал на экране"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
+      <button id="animBtn" class="mi">🎬 Анимации</button>
       <div class="msec">Камера</div>
       <label class="mopt"><input type="radio" name="cammode" value="free"> Свободная — остаётся, как вы её повернули</label>
       <label class="mopt"><input type="radio" name="cammode" value="turn"> Поворот к игроку после каждого хода</label>
       <div class="mrow"><button id="rotL" class="mi" title="Повернуть (Q)">⟲ Повернуть</button><button id="rotR" class="mi" title="Повернуть (E)">Повернуть ⟳</button></div>
+    </div>
+
+    <!-- вкладка «Анимации»: выбор анимаций фигур -->
+    <div id="animPanel" class="hudpanel hidden">
+      <button id="animClose" class="xbtn" aria-label="Закрыть">✕</button>
+      <h3>🎬 Анимации</h3>
+      <div class="asec"><span class="fdot" style="--fc:#3b82f6"></span>Люди · Жрец — дальняя атака</div>
+      <div class="atiles" data-key="priest">
+        <button class="atile" data-val="prayer" title="Жрец встаёт на колени и молится, с неба бьёт столб света">
+          <svg viewBox="0 0 64 64"><path class="a-gold" d="M42 4v40M50 4v40M46 2v4"/><path class="a-gold" d="M38 8l-3-4M54 8l3-4"/>
+            <circle cx="16" cy="30" r="4"/><path d="M16 34l3 9h-9M19 43l-1 8M16 36l5-6M16 36l-1-7"/>
+            <path class="a-red" d="M46 58c-4 0-5-2-5-4l2-4-1-3a3 3 0 1 1 6 0l-1 3 2 4c0 2-1 4-3 4z"/>
+            <path class="a-gold" d="M24 20l1 2M8 18l1-2M27 30h2"/><ellipse class="a-gold" cx="16" cy="24" rx="5" ry="1.5"/></svg>
+          <span>Молитва</span></button>
+        <button class="atile" data-val="ufo" title="Жрец зовёт НЛО: прожектор поднимает фигуру, она вращается и улетает">
+          <svg viewBox="0 0 64 64"><ellipse cx="32" cy="14" rx="17" ry="5"/><path class="a-cyan" d="M24 12a8 6 0 0 1 16 0"/>
+            <path class="a-green" d="M25 19L15 58M39 19l10 39"/><path class="a-green" d="M18 58h28" stroke-dasharray="2 3"/>
+            <path class="a-red" d="M32 46c-3 0-4-2-4-3l2-3-1-2a3 3 0 1 1 6 0l-1 2 2 3c0 1-1 3-4 3z"/>
+            <path d="M23 37a10 4 0 0 0 18 0M41 37l-2 3M41 37l-3-1"/><path d="M32 32v-6M29 28l3-3 3 3"/></svg>
+          <span>НЛО</span></button>
+        <button class="atile" data-val="lightning" title="Жрец призывает молнию, на клетке остаётся чёрный след">
+          <svg viewBox="0 0 64 64"><path d="M18 18a7 7 0 0 1 6-9 9 9 0 0 1 17 1 6 6 0 0 1 4 11H20a5 5 0 0 1-2-3z"/>
+            <path class="a-cyan" d="M34 22l-7 13h8l-6 14 13-18h-8l5-9z"/>
+            <ellipse class="a-dark" cx="31" cy="56" rx="13" ry="3.5"/><path class="a-gray" d="M22 56l-4-1M40 56l5-2M31 59v3M27 53l-2-3M36 53l3-3"/></svg>
+          <span>Молния</span></button>
+      </div>
+      <div class="asec"><span class="fdot" style="--fc:#dc2626"></span>Демоны · Обелиск — дальняя атака</div>
+      <div class="atiles" data-key="obelisk">
+        <button class="atile" data-val="sink" title="Цель дрожит, её засасывает в доску, по поверхности расходятся красные круги">
+          <svg viewBox="0 0 64 64"><path class="a-red" d="M10 8l5-4 5 4v20h-10z"/><path class="a-red" d="M22 14l8 6M24 22l9 2" stroke-dasharray="2 3"/>
+            <path d="M38 22c-3 0-4-2-4-3l2-3-1-2a3 3 0 1 1 6 0l-1 2 2 3c0 1-1 3-4 3z"/><path d="M31 18l-2-1M47 18l2-1M31 24l-2 1M47 24l2 1"/>
+            <path d="M38 30v8M35 35l3 3 3-3"/>
+            <ellipse class="a-red" cx="38" cy="48" rx="7" ry="2"/><ellipse class="a-red" cx="38" cy="48" rx="15" ry="4.5"/><ellipse class="a-red" cx="38" cy="48" rx="23" ry="7" stroke-dasharray="3 3"/></svg>
+          <span>Трясина</span></button>
+      </div>
+      <div class="ahint">Выбранная анимация срабатывает при дальней атаке фигуры (2-е нажатие на неё). Анимации других фигур появятся позже.</div>
     </div>
 
     <!-- сверху по центру: виды камеры и строка состояния -->

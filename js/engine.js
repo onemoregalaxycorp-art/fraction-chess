@@ -115,7 +115,11 @@
     allPieces() { const r = []; for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) if (this.board[y][x]) r.push({ p: this.board[y][x], x, y }); return r; }
     pieces(owner) { return this.allPieces().filter(o => o.p.owner === owner); }
     find(id) { return this.allPieces().find(o => o.p.id === id) || null; }
-    leader(owner) { return this.pieces(owner).find(o => this.def(o.p).royal) || null; }
+    // лидер стороны; у Демонов после гибели Призывателя лидером становится Король демонов (faction.heir)
+    leader(owner) {
+      const ps = this.pieces(owner), heir = this.faction(owner).heir;
+      return ps.find(o => this.def(o.p).royal) || (heir && ps.find(o => o.p.type === heir)) || null;
+    }
     log(m) { this.logs.push(`[${this.turnNo}] ${m}`); }
     isCursed(x, y, owner) { return this.curses.some(c => c.x === x && c.y === y && (owner == null || c.owner === owner)); }
 
@@ -123,7 +127,10 @@
       if (!q || q === p) return false;
       if (q.owner !== p.owner) return true;
       // Взятие союзников — только у Демонов, и не своего лидера
-      return this.def(p).faction === 'demons' && !this.def(q).royal;
+      if (this.def(p).faction !== 'demons' || this.def(q).royal) return false;
+      // последнего лидера (Короля демонов без Призывателя) свои брать не могут
+      if (q.type === this.faction(q.owner).heir) { const l = this.leader(q.owner); if (l && l.p === q) return false; }
+      return true;
     }
 
     /* --- генерация действий --- */
@@ -360,12 +367,16 @@
     onRemoved(v, x, y, by) {
       const vd = this.def(v);
       if (vd.cls === 'queen') this.players[1 - v.owner].queenCaptured = true;
-      if (vd.royal) {
+      const heir = this.faction(v.owner).heir;
+      // Демоны проигрывают, только когда мертвы и Призыватель, и Король демонов
+      const lastLeader = vd.royal ? !this.leader(v.owner) : (heir && v.type === heir && !this.leader(v.owner));
+      if (lastLeader) {
         this.winner = 1 - v.owner;
-        this.winReason = `${this.who(v)} уничтожен(а)`;
+        this.winReason = heir ? `${this.who(v)} уничтожен(а) — у Демонов не осталось ни Призывателя, ни Короля демонов` : `${this.who(v)} уничтожен(а)`;
         this.log(`★ ${this.winReason}. Победа: ${FC.COLOR_NAME[this.winner]}`);
         return;
       }
+      if (vd.royal) this.log(`${this.who(v)} пал, но Король демонов жив — Демоны продолжают бой. Возрождать Короля больше некому.`);
       if (by) {
         const bd = this.def(by), bp = this.players[by.owner];
         // Нежить: пул воскрешения

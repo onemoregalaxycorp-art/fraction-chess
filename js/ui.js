@@ -8,7 +8,7 @@
   const ASSUMPTIONS = [
     'Шах: лидер (Король, Шаман, Филактерий) не может ходить под удар, и нельзя оставлять его под ударом. Мат — поражение, пат — ничья.',
     'Ничья: если одна и та же позиция повторилась 3 раза, или прошло 50 ходов каждой стороны без единого взятия (превращение Личем тоже считается взятием). Счётчики появляются вверху, когда ничья близко.',
-    'У Демонов нет шаха и мата: Призыватель и Король демонов могут стоять и ходить под удар. Демоны проигрывают, только если Призывателя взяли или он не может возродить Короля демонов (рядом нет жертвы).',
+    'У Демонов нет шаха и мата: Призыватель и Король демонов могут стоять и ходить под удар. Демоны проигрывают, только когда мертвы и Призыватель, и Король демонов (или Король пал, а Призывателю некого принести в жертву). Если Призыватель погиб, а Король жив — игра продолжается.',
     'Импы появляются у ближайшего Обелиска, когда любая фигура Демонов, кроме Импа, берёт вражескую фигуру.',
     'Нежить: на доске не больше 12 Скелетов — при попытке призвать больше вверху появится предупреждение.',
     'После гибели Короля демонов следующий ход Демонов уходит на жертвоприношение (2-е нажатие на Призывателя). Нет жертвы — поражение.',
@@ -38,7 +38,7 @@
     $('cardsClose').onclick = () => $('cards').classList.add('hidden');
     initHud();
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { $('cards').classList.add('hidden'); closeMenu(); setPanel(false); }
+      if (e.key === 'Escape') { $('cards').classList.add('hidden'); closeMenu(); setPanel(false); if ($('animPanel')) $('animPanel').classList.add('hidden'); }
       const k = e.key.toLowerCase();
       if (e.ctrlKey && (k === 'y' || k === 'н' || (e.shiftKey && (k === 'z' || k === 'я')))) { e.preventDefault(); redo(); }
       else if (e.ctrlKey && (k === 'z' || k === 'я')) { e.preventDefault(); undo(); }
@@ -92,6 +92,20 @@
     $('pieceBtn').onclick = () => { closeMenu(); setPanel($('piecePanel').classList.contains('hidden')); };
     $('pieceClose').onclick = () => setPanel(false);
     $('players').onclick = () => $('players').classList.toggle('expanded');
+    // вкладка «Анимации»: плитки, выбор хранится в localStorage (fc.anim.<ключ>), его читает js/gl/board3d.js
+    const DEF = { priest: 'prayer', obelisk: 'sink' };
+    $('animBtn').onclick = () => { closeMenu(); setPanel(false); $('animPanel').classList.remove('hidden'); };
+    $('animClose').onclick = () => $('animPanel').classList.add('hidden');
+    for (const box of document.querySelectorAll('.atiles')) {
+      const key = box.dataset.key, cur = store.get('fc.anim.' + key) || DEF[key];
+      for (const t of box.querySelectorAll('.atile')) {
+        t.classList.toggle('on', t.dataset.val === cur);
+        t.onclick = () => {
+          store.set('fc.anim.' + key, t.dataset.val);
+          for (const o of box.querySelectorAll('.atile')) o.classList.toggle('on', o === t);
+        };
+      }
+    }
   }
   let toastTimer = 0;
   function toast(msg) {
@@ -166,7 +180,13 @@
     }
     if (sel && ctx && sel.own && !ai[G.turn]) {
       const acts = ctx.acts.filter(a => a.x === x && a.y === y);
-      const ghost = (ctx.ghost || []).filter(a => a.x === x && a.y === y);
+      let ghost = (ctx.ghost || []).filter(a => a.x === x && a.y === y);
+      // 1-е нажатие: если фигура вообще может пойти на эту клетку (например, Король), клик — это ход,
+      // а не призыв; призыв туда — только 2-м нажатием на фигуру
+      if (ghost.length && sel.mode === 'normal' && G.actionsFor(sel.x, sel.y, 'normal').acts.some(a => a.x === x && a.y === y)) {
+        ghost = ghost.filter(a => a.kind !== 'summon' && a.kind !== 'revive');
+        if (!acts.length && !ghost.length) { toast('Туда ходить нельзя: поле под ударом. Чтобы призвать фигуру — нажмите на неё ещё раз.'); return; }
+      }
       if (acts.length || ghost.length) { chooseAction(acts.concat(ghost)); return; }
     }
     const p = G.at(x, y);
@@ -195,7 +215,11 @@
       render();
       if (ai[pend.owner]) {
         busy = true;
-        setTimeout(() => { busy = false; G.resolvePending(FC.AI.resolve(G, pend)); afterAction(); }, 500);
+        const game = G;
+        setTimeout(() => {
+          if (game !== G) return;   // за это время начали новую партию
+          busy = false; G.resolvePending(FC.AI.resolve(G, pend)); afterAction();
+        }, 500);
       } else if (pend.kind === 'options') {
         modal(pend.text, pend.options.map(o => ({ label: o.label, fn: () => { G.resolvePending(o); afterAction(); } })), true);
       }
@@ -309,11 +333,12 @@
     }
     const obst = new Set(ctx && !pend ? ctx.obstacles.map(o => o[0] + ',' + o[1]) : []);
     const th = threats();
-    let mover = null;
+    let mover = null, shot = null;
     const hits = new Set();
     if (anim) {
       const f = G.find(anim.pid);
-      if (f && (f.x !== anim.from[0] || f.y !== anim.from[1])) mover = { pid: anim.pid, x: f.x, y: f.y, fx: anim.from[0], fy: anim.from[1], dx: anim.from[0] - f.x, dy: f.y - anim.from[1] };
+      if (f && (f.x !== anim.from[0] || f.y !== anim.from[1])) mover = { pid: anim.pid, x: f.x, y: f.y, fx: anim.from[0], fy: anim.from[1], dx: anim.from[0] - f.x, dy: f.y - anim.from[1], kind: anim.kind };
+      if (f && anim.kind === 'ranged') shot = { pid: anim.pid, x: f.x, y: f.y, hits: anim.hit };   // выстрел: фигура стоит, бьёт издалека
       for (const h of anim.hit) hits.add(h[0] + ',' + h[1]);
       anim = null;
     }
@@ -328,7 +353,7 @@
           hl: map[key] ? hlFor(map[key]) : null, block: obst.has(key), boom: hits.has(key)
         });
       }
-      if (FC.GL) FC.GL.render({ cells, sel, mover, turn: G.turn, game: G });
+      if (FC.GL) FC.GL.render({ cells, sel, mover, shot, turn: G.turn, game: G });
       return;
     }
     for (let y = 7; y >= 0; y--) for (let x = 0; x < 8; x++) {
@@ -419,6 +444,7 @@
     const p = G.at(sel.x, sel.y), d = G.def(p), F = FC.FACTIONS[d.faction];
     const st = [];
     if (d.royal) st.push('👑 Лидер');
+    else { const l = G.leader(p.owner); if (l && l.p === p) st.push('👑 Последний лидер (Призыватель пал)'); }
     if (p.cooldown > 0) st.push('⏳ Перезарядка дальней атаки');
     else if (d.ranged) st.push('🎯 Дальняя атака готова');
     if (p.bloodlust > 0) st.push('🩸 Кровожадность');
