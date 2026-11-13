@@ -131,11 +131,13 @@ function resize() {
 }
 
 /* ---------- загрузка моделей ---------- */
+let loadProg = () => '';
 function loadAssets() {
   const status = document.getElementById('glstatus');
   const loader = new GLTFLoader();
   const paths = [...Object.values(BOARDS).map(b => b.path), ...new Set(Object.values(MODEL_FOR))];
   let done = 0;
+  loadProg = () => `${done}/${paths.length}`;
   const one = p => new Promise(res => loader.load(`models/${p}.glb`, g => {
     const root = g.scene;
     root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
@@ -1266,7 +1268,10 @@ function coinFace(letter, fg, bg) {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
 function coinToss(first, done) {
-  if (!ready) { setTimeout(() => coinToss(first, done), 200); return; }
+  if (!ready) {                                        // модели ещё грузятся (первое открытие сайта на телефоне) — показываем прогресс
+    const b = document.getElementById('banner'); if (b) b.innerHTML = `⏳ Загрузка 3D-моделей… ${loadProg()} — после неё бросим монетку`;
+    setTimeout(() => coinToss(first, done), 200); return;
+  }
   const R = 0.62;
   const rim = new THREE.MeshStandardMaterial({ color: 0xd4a017, metalness: 0.85, roughness: 0.3, emissive: 0x3a2a00, emissiveIntensity: 0.4 });
   const top = new THREE.MeshStandardMaterial({ map: coinFace('Б', '#111827', '#f3f4f6'), metalness: 0.4, roughness: 0.4 });

@@ -561,6 +561,7 @@
       onlineWaitClosed(e.text); return;
     }
     if (e.type === 'code') { onlineShowCode(e.code); return; }
+    if (e.type === 'stage') { const s = $('onlStage'); if (s) s.textContent = '⏳ ' + e.text; return; }
     if (e.type === 'open') { if (onlineRole === 'guest') FC.Net.send({ t: 'hello', f: onlinePick, v: NET_V }); return; }
     if (e.type !== 'msg') return;
     const m = e.data;
@@ -619,6 +620,7 @@
   function onlineMenu(code) {
     if (!FC.Net || !window.Peer) { modal('Сетевая игра недоступна: не загрузилась библиотека соединения.', [{ label: 'Закрыть' }]); return; }
     code = FC.Net.norm(code);
+    FC.Net.prepare();               // заранее подключаемся к серверу — «Подключиться» сработает быстрее
     modal(`<h2>🌐 Онлайн-игра</h2>
       <p class="small">Играйте с другом на разных устройствах. Один создаёт комнату и отправляет ссылку, второй открывает её.</p>
       <label class="onl-l">Ваша фракция <select id="onlFac">${facOptions($('f0').value)}</select></label>
@@ -631,7 +633,7 @@
   function clearRoomParam() { if (/[?&]room=/.test(location.search)) history.replaceState(null, '', location.pathname); }
   function onlineHost() {
     onlinePick = $('onlFac').value; onlineRole = 'host';
-    modal('<h2>🌐 Создаём комнату…</h2><p class="small">Подключение к серверу соединения</p>', [{ label: 'Отмена', fn: onlineCancel }], true);
+    modal('<h2>🌐 Создаём комнату…</h2><p class="small onl-wait" id="onlStage">⏳ Подключение к серверу соединения…</p>',[{ label: 'Отмена', fn: onlineCancel }], true);
     FC.Net.host(onNet);
   }
   function onlineShowCode(code) {
@@ -639,7 +641,7 @@
     modal(`<h2>🌐 Комната ${code}</h2>
       <p>Вы играете <b>Белыми</b> (${FC.FACTIONS[onlinePick].name}). Отправьте другу ссылку — или код <b class="onl-code">${code}</b>:</p>
       <p><input id="onlLink" class="onl-link" readonly value="${link}"></p>
-      <p class="small onl-wait">⏳ Ждём соперника… Не закрывайте эту страницу.</p>`,
+      <p class="small onl-wait" id="onlStage">⏳ Ждём соперника… Не закрывайте эту страницу.</p>`,
       [{ label: '📋 Копировать ссылку', keep: true, fn: () => copyLink(link) }].concat(navigator.share ? [{ label: '📤 Поделиться', keep: true, fn: () => navigator.share({ title: 'Fraction Chess', text: 'Сыграем в Fraction Chess? Комната ' + code, url: link }).catch(() => { }) }] : [])
         .concat([{ label: 'Отмена', fn: onlineCancel }]), true);
     const inp = $('onlLink'); if (inp) inp.onclick = () => inp.select();
@@ -653,7 +655,8 @@
     if (!code || code.length < 4) { toast('Введите код комнаты'); onlineMenu(); return; }
     onlinePick = $('onlFac').value; onlineRole = 'guest';
     clearRoomParam();
-    modal(`<h2>🌐 Подключение к комнате ${code}…</h2><p class="small">Вы будете играть <b>Чёрными</b> (${FC.FACTIONS[onlinePick].name})</p>`, [{ label: 'Отмена', fn: onlineCancel }], true);
+    modal(`<h2>🌐 Подключение к комнате ${code}…</h2><p class="small">Вы будете играть <b>Чёрными</b> (${FC.FACTIONS[onlinePick].name})</p>
+      <p class="small onl-wait" id="onlStage">⏳ Подключение к серверу соединения…</p>`,[{ label: 'Отмена', fn: onlineCancel }], true);
     FC.Net.join(code, onNet);
   }
   function onlineCancel() { onlineRole = null; FC.Net.stop(); }
