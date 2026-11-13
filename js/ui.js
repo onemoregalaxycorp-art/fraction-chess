@@ -618,7 +618,7 @@
   let onlineRole = null, onlinePick = null;
   const facOptions = sel0 => Object.keys(FC.FACTIONS).map(id => `<option value="${id}"${id === sel0 ? ' selected' : ''}>${FC.FACTIONS[id].name}</option>`).join('');
   function onlineMenu(code) {
-    if (!FC.Net || !window.Peer) { modal('Сетевая игра недоступна: не загрузилась библиотека соединения.', [{ label: 'Закрыть' }]); return; }
+    if (!FC.Net || !window.WebSocket) { modal('Сетевая игра недоступна в этом браузере.',[{ label: 'Закрыть' }]); return; }
     code = FC.Net.norm(code);
     FC.Net.prepare();               // заранее подключаемся к серверу — «Подключиться» сработает быстрее
     modal(`<h2>🌐 Онлайн-игра</h2>
