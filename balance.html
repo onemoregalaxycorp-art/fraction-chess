@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Fraction Chess — тест баланса</title>
+<style>
+body{font-family:Consolas,monospace;background:#111;color:#ddd;padding:20px;font-size:14px}
+table{border-collapse:collapse;margin:10px 0 24px}td,th{border:1px solid #444;padding:4px 9px;text-align:center}
+th{background:#1f2433}.good{background:#14532d}.bad{background:#7f1d1d}.mid{background:#3f3f1d}
+input{width:60px;background:#222;color:#fff;border:1px solid #555}button{padding:6px 14px}
+</style></head>
+<body>
+<h2>Тест баланса: ИИ против ИИ, все пары фракций</h2>
+<p>Партий на пару (поровну за белых и чёрных): <input id="n" value="20"> · Лимит полуходов: <input id="lim" value="200">
+<button id="go">Запустить</button></p>
+<p class="small">Если лимит исчерпан — победа по материалу (перевес ≥ 4 очков), иначе ничья. Ценность: пешка 1, конь/слон 3, ладья 5, ферзь 9.</p>
+<div id="prog"></div><div id="out"></div>
+<script src="js/engine.js"></script>
+<script src="js/factions/humans.js"></script>
+<script src="js/factions/orcs.js"></script>
+<script src="js/factions/demons.js"></script>
+<script src="js/factions/undead.js"></script>
+  <script src="js/factions/dwarves.js"></script>
+  <script src="js/factions/elves.js"></script>
+  <script src="js/factions/chthon.js"></script>
+<script src="js/ai.js"></script>
+<script>
+FC.AI.depth = 1;   // массовые партии — быстрая оценка на 1 ход (поиск на 3 хода проверяется отдельным тестом)
+
+const ids = Object.keys(FC.FACTIONS);
+const material = (G, o) => G.pieces(o).reduce((s, e) => s + (G.def(e.p).royal ? 0 : FC.VALUE[G.def(e.p).cls]), 0);
+
+function playOne(f0, f1, lim) {
+  const G = new FC.Game(f0, f1);
+  G.turn = Math.random() < .5 ? 0 : 1;
+  const first = G.turn;
+  const st = [0, 1].map(() => ({ captures: 0, capturedValue: 0, ranged: 0, summon: 0, revive: 0, convert: 0, stolen: 0, special: 0, moves: 0 }));
+  let ply = 0;
+  for (; ply < lim && G.winner == null; ply++) {
+    const o = G.turn;
+    const a = FC.AI.choose(G, o);
+    if (!a) break;
+    const s = st[o]; s.moves++;
+    if (a.kind === 'capture' || a.kind === 'ranged') for (const [hx, hy] of (a.hits || [[a.x, a.y]])) { const q = G.at(hx, hy); if (q && q.owner !== o) { s.captures++; s.capturedValue += G.def(q).royal ? 0 : FC.VALUE[G.def(q).cls]; } }
+    if (a.kind === 'ranged') s.ranged++;
+    if (a.kind === 'summon') s.summon++;
+    if (a.kind === 'revive') s.revive++;
+    if (a.kind === 'convert') s.convert++;
+    if (a.kind === 'special') s.special++;
+    if (a.stolen) s.stolen++;
+    G.doAction(a);
+    let p, g = 0;
+    while (G.winner == null && (p = G.nextPending()) && g++ < 20) G.resolvePending(FC.AI.resolve(G, p));
+    G.queue = [];
+    G.history = []; G.future = [];
+    if (G.winner == null) G.endTurn();
+  }
+  let winner = G.winner, how = 'mate';
+  if (winner === -1) {
+    // ничья по правилам игры — это настоящая ничья, без пересчёта по материалу
+    how = /повторилась/.test(G.winReason) ? 'repetition' : /50 ходов/.test(G.winReason) ? 'fifty' : 'stalemate';
+  } else if (winner == null) {
+    const m0 = material(G, 0), m1 = material(G, 1);
+    how = 'limit';
+    winner = m0 - m1 >= 4 ? 0 : m1 - m0 >= 4 ? 1 : -1;
+    if (winner !== -1) how = 'material';
+  } else if (/Король демонов/.test(G.winReason)) how = 'demonking';
+  return { winner, how, first, plies: ply, st, end: [G.pieces(0).length, G.pieces(1).length], mat: [material(G, 0), material(G, 1)] };
+}
+
+const R = {};   // R[a][b] = {w,d,l,...} с точки зрения фракции a
+const F = {};   // итоги по фракциям
+function rec(a, b, res, side) {
+  R[a] = R[a] || {}; const r = R[a][b] = R[a][b] || { w: 0, d: 0, l: 0, mw: 0, ml: 0 };
+  if (res.how !== 'material') { if (res.winner === side) r.mw++; else if (res.winner === 1 - side) r.ml++; }
+  const f = F[a] = F[a] || { w: 0, d: 0, l: 0, n: 0, plies: 0, mateW: 0, matW: 0, mateL: 0, captures: 0, capV: 0, ranged: 0, summon: 0, revive: 0, convert: 0, stolen: 0, special: 0, endPieces: 0, demonking: 0 };
+  const win = res.winner === side, loss = res.winner === 1 - side;
+  if (win) { r.w++; f.w++; if (res.how === 'mate') f.mateW++; else f.matW++; }
+  else if (loss) { r.l++; f.l++; if (res.how === 'mate' || res.how === 'demonking') f.mateL++; if (res.how === 'demonking') f.demonking++; }
+  else { r.d++; f.d++; }
+  f.n++; f.plies += res.plies;
+  const s = res.st[side];
+  f.captures += s.captures; f.capV += s.capturedValue; f.ranged += s.ranged; f.summon += s.summon; f.revive += s.revive; f.convert += s.convert; f.stolen += s.stolen; f.special += s.special;
+  f.endPieces += res.end[side];
+}
+const meta = { white: 0, black: 0, first: 0, second: 0, draws: 0, games: 0, how: {} };
+
+document.getElementById('go').onclick = () => {
+  const N = +document.getElementById('n').value, lim = +document.getElementById('lim').value;
+  const jobs = [];
+  for (let i = 0; i < ids.length; i++) for (let j = i; j < ids.length; j++) for (let g = 0; g < N; g++) jobs.push(g % 2 ? [ids[j], ids[i]] : [ids[i], ids[j]]);
+  let k = 0; const t0 = performance.now();
+  window.BAL_DONE = false;
+  (function step() {
+    const tEnd = performance.now() + 2000;
+    while (k < jobs.length && performance.now() < tEnd) {
+      const [a, b] = jobs[k++];
+      const res = playOne(a, b, lim);
+      rec(a, b, res, 0); if (a !== b) rec(b, a, res, 1); else { /* зеркальная пара */ }
+      meta.games++; meta.how[res.how] = (meta.how[res.how] || 0) + 1;
+      if (res.winner === 0) meta.white++; else if (res.winner === 1) meta.black++; else meta.draws++;
+      if (res.winner === res.first) meta.first++; else if (res.winner === 1 - res.first) meta.second++;
+    }
+    document.getElementById('prog').textContent = `Сыграно ${k} / ${jobs.length} · ${Math.round((performance.now() - t0) / 1000)} с`;
+    if (k < jobs.length) setTimeout(step, 0); else { report(); window.BAL_DONE = true; }
+  })();
+};
+
+function pct(x) { return Math.round(x * 100) + '%'; }
+function report() {
+  let h = '<h3>Матрица: очки фракции по строке против фракции в столбце ((победы + ½ ничьих) / партии)</h3><table><tr><th></th>' + ids.map(i => `<th>${FC.FACTIONS[i].name}</th>`).join('') + '</tr>';
+  const M = {};
+  for (const a of ids) {
+    h += `<tr><th>${FC.FACTIONS[a].name}</th>`;
+    for (const b of ids) {
+      if (a === b) { h += '<td>—</td>'; continue; }
+      const r = R[a][b], n = r.w + r.d + r.l, sc = (r.w + r.d / 2) / n;
+      M[a + '>' + b] = { sc, ...r };
+      h += `<td class="${sc >= .6 ? 'good' : sc <= .4 ? 'bad' : 'mid'}">${pct(sc)}<br><small>${r.w}-${r.d}-${r.l}</small></td>`;
+    }
+    h += '</tr>';
+  }
+  h += '</table>';
+  h += '<h3>Итоги по фракциям (все соперники, без зеркальных партий)</h3><table><tr><th>Фракция</th><th>Очки</th><th>Очки только по матам</th><th>П-Н-П</th><th>Победы матом</th><th>Победы по материалу</th><th>Поражения матом</th><th>Ср. длина</th><th>Взятий/партию</th><th>Ценность взятого</th><th>Дальних атак</th><th>Призывов</th><th>Воскрешений</th><th>Превращений</th><th>Похищ. ходов</th><th>Фигур в конце</th></tr>';
+  const S = {};
+  for (const a of ids) {
+    // без зеркальных партий
+    let w = 0, d = 0, l = 0, mw = 0, ml = 0; for (const b of ids) if (a !== b) { w += R[a][b].w; d += R[a][b].d; l += R[a][b].l; mw += R[a][b].mw; ml += R[a][b].ml; }
+    const f = F[a], n = f.n, sc = (w + d / 2) / (w + d + l), tot = w + d + l;
+    const mateScore = (mw + (tot - mw - ml) / 2) / tot;   // победы по материалу на лимите считаются ничьей
+    S[a] = { score: sc, mateScore, mw, ml, w, d, l, mateW: f.mateW, matW: f.matW, mateL: f.mateL, demonking: f.demonking, plies: f.plies / n, captures: f.captures / n, capV: f.capV / n, ranged: f.ranged / n, summon: f.summon / n, revive: f.revive / n, convert: f.convert / n, stolen: f.stolen / n, endPieces: f.endPieces / n };
+    const x = S[a];
+    h += `<tr><th>${FC.FACTIONS[a].name}</th><td class="${sc >= .58 ? 'good' : sc <= .42 ? 'bad' : 'mid'}">${pct(sc)}</td><td>${pct(mateScore)}</td><td>${w}-${d}-${l}</td><td>${f.mateW}</td><td>${f.matW}</td><td>${f.mateL}${f.demonking ? ` (из них Король демонов: ${f.demonking})` : ''}</td><td>${x.plies.toFixed(0)}</td><td>${x.captures.toFixed(1)}</td><td>${x.capV.toFixed(1)}</td><td>${x.ranged.toFixed(1)}</td><td>${x.summon.toFixed(1)}</td><td>${x.revive.toFixed(1)}</td><td>${x.convert.toFixed(1)}</td><td>${x.stolen.toFixed(1)}</td><td>${x.endPieces.toFixed(1)}</td></tr>`;
+  }
+  h += '</table>';
+  h += `<p>Всего партий: ${meta.games}. Белые выиграли ${meta.white}, чёрные ${meta.black}, ничьих ${meta.draws}. Ходивший первым выиграл ${meta.first}, вторым — ${meta.second}. Исходы: ${JSON.stringify(meta.how)}</p>`;
+  document.getElementById('out').innerHTML = h;
+  window.BAL_RESULT = { M, S, meta };
+}
+</script>
+</body></html>

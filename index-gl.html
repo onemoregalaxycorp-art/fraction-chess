@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d13">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Fraction Chess">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <title>Fraction Chess — 3D-модели</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style3d.css">
+  <link rel="stylesheet" href="css/gl.css">
+  <link rel="stylesheet" href="css/hud.css">
+  <link rel="stylesheet" href="css/mobile.css">
+</head>
+<body class="view3d viewgl">
+  <div id="rotate"><div class="ph"></div><div>Поверните телефон горизонтально</div></div>
+  <div id="setup" class="screen">
+    <h1>FRACTION CHESS</h1>
+    <p class="sub">v0.3 · поле боя с 3D-моделями</p>
+    <div class="setup-grid">
+      <div class="pcard">
+        <h3>Белые · Игрок 1</h3>
+        <select id="f0"></select>
+        <label class="chk"><input type="checkbox" id="ai0"> Управляет компьютер</label>
+        <div class="fdesc" id="fd0"></div>
+      </div>
+      <div class="pcard">
+        <h3>Чёрные · Игрок 2</h3>
+        <select id="f1"></select>
+        <label class="chk"><input type="checkbox" id="ai1"> Управляет компьютер</label>
+        <div class="fdesc" id="fd1"></div>
+      </div>
+    </div>
+    <button id="startBtn" class="big">Бросить монету и начать</button>
+    <div class="tutorRow"><button id="tutorBtn" class="big">🎓 Обучение с ботом<small>вы — Белые (Игрок 1), бот — Чёрные; его ферзь объясняет каждый ход</small></button></div>
+    <p><button class="cardsBtn">📖 Справочник фигур</button> <a class="viewlink" href="index3d.html">Упрощённый 3D-вид →</a> <a class="viewlink" href="index.html">2D-вид →</a></p>
+    <p class="hint">Цель — поставить мат вражескому лидеру. 1-е нажатие на фигуру — обычные ходы, 2-е — особые способности.</p>
+  </div>
+
+  <div id="coin" class="overlay hidden">
+    <div class="coinbox">
+      <h2>Жеребьёвка</h2>
+      <div class="coinstage"><div id="coinEl" class="coin"><div class="face front">Б</div><div class="face back">Ч</div></div></div>
+      <div id="coinText">&nbsp;</div>
+      <button id="coinOk" class="big hidden">Начать партию</button>
+    </div>
+  </div>
+
+  <div id="game" class="hidden">
+    <div id="stage"><div id="glhost"></div><div id="glstatus">Загрузка 3D-моделей…</div></div>
+
+    <!-- слева вверху: 2D-карта, кнопки рядом с ней, история ходов -->
+    <div id="hudTL">
+      <div class="tlrow">
+        <div id="minimap" title="2D-карта: нажмите на клетку, чтобы выбрать фигуру или сходить"></div>
+        <div id="sideBtns">
+          <button id="setBtn" class="hudbtn" title="Настройки" aria-label="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+          <button id="menuBtn" class="hudbtn" title="Меню" aria-label="Меню"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+          <button id="undoBtn" class="hudbtn" title="Ход назад (Ctrl+Z)" aria-label="Ход назад"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>
+          <button id="redoBtn" class="hudbtn" title="Ход вперёд (Ctrl+Y)" aria-label="Ход вперёд"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        </div>
+      </div>
+      <div id="logDock"><div id="log"></div></div>
+    </div>
+
+    <!-- меню (кнопка ☰ рядом с картой) -->
+    <div id="menu" class="hudpanel hidden">
+      <button class="cardsBtn mi">📖 Справочник фигур</button>
+      <button id="rulesBtn" class="mi">📜 Правила</button>
+      <button id="newGame" class="mi">⟲ Новая игра</button>
+      <button id="animBtn" class="mi">🎬 Анимации</button>
+      <button id="logBtn" class="mi">📋 Журнал событий (подробно)</button>
+      <div class="msec">Быстро включить</div>
+      <label class="mopt"><input type="checkbox" data-set="hist"> История ходов</label>
+      <label class="mopt"><input type="checkbox" data-set="mm"> 2D-карта</label>
+      <label class="mopt"><input type="checkbox" data-set="train"> Режим тренировки (подсветка угроз на 2D-карте)</label>
+    </div>
+
+    <!-- настройки (кнопка ⚙ рядом с картой): разделы слева, настройки раздела справа -->
+    <div id="settings" class="hudpanel hidden">
+      <div class="stHead"><b>Настройки</b><button id="setClose" class="xbtn" aria-label="Закрыть">✕</button></div>
+      <div class="stBody">
+        <nav id="setTabs">
+          <button data-sec="screen" class="on">🖥 Экран</button>
+          <button data-sec="camera">🎥 Камера</button>
+          <button data-sec="train">🎓 Тренировка</button>
+          <button data-sec="anim">🎬 Анимации</button>
+          <button data-sec="ai">🤖 Компьютер</button>
+          <button data-sec="control">👆 Управление</button>
+        </nav>
+        <div id="setPane">
+          <section data-sec="screen">
+            <h4>2D-карта</h4>
+            <label class="sopt"><input type="checkbox" data-set="mm"> Показывать 2D-карту</label>
+            <label class="sopt col">Прозрачность: <b data-out="mmOp"></b><input type="range" min="20" max="100" step="5" data-set="mmOp"></label>
+            <label class="sopt col">Размер<select data-set="mmSize"><option value="s">Маленькая</option><option value="m">Средняя</option><option value="l">Большая</option></select></label>
+            <h4>История ходов</h4>
+            <label class="sopt"><input type="checkbox" data-set="hist"> Показывать историю ходов</label>
+            <label class="sopt col">Прозрачность: <b data-out="histOp"></b><input type="range" min="20" max="100" step="5" data-set="histOp"></label>
+            <p class="shint">Ходы записываются клетками, как в шахматах: e2-e4 — ход, e4xd5 — взятие, e2→e5 — выстрел, @c3 — призыв, e1* — способность, ~2← — сдвиг линии.</p>
+            <h4>Подсказки</h4>
+            <label class="sopt"><input type="checkbox" data-set="tips"> Подсказка при наведении на клетку</label>
+          </section>
+          <section data-sec="camera" hidden>
+            <h4>Режим камеры</h4>
+            <label class="sopt"><input type="radio" name="cammode" value="free"> Свободная — остаётся, как вы её повернули</label>
+            <label class="sopt"><input type="radio" name="cammode" value="turn"> Поворот к игроку после каждого хода</label>
+            <h4>Вид при старте партии</h4>
+            <label class="sopt col"><select data-set="view"><option value="iso">Изометрия</option><option value="angled">Под углом</option><option value="top">Сверху</option></select></label>
+            <h4>Повернуть доску</h4>
+            <div class="srow"><button id="rotL" class="mi" title="Q">⟲ Влево</button><button id="rotR" class="mi" title="E">Вправо ⟳</button></div>
+            <p class="shint">Клавиши: Q / E — поворот, 1 / 2 / 3 — вид, + / − — приблизить и отдалить.</p>
+          </section>
+          <section data-sec="train" hidden>
+            <h4>Режим тренировки</h4>
+            <label class="sopt"><input type="checkbox" data-set="train"> Включить режим тренировки</label>
+            <p class="shint">Подсветка работает только на 2D-карте и считается для того, кто сейчас ходит.</p>
+            <label class="sopt"><input type="checkbox" data-set="trThreat"> <span><span class="sw red"></span> Клетки под угрозой: красное свечение и цифра — сколько вражеских фигур бьют клетку</span></label>
+            <label class="sopt"><input type="checkbox" data-set="trDef"> <span><span class="sw green"></span> Защищённые клетки: зелёное свечение и цифра — сколько своих фигур защищают клетку</span></label>
+            <h4>Наставник</h4>
+            <p class="shint">Наставник объясняет ходы компьютера. Он включается кнопкой «Обучение с ботом» на стартовом экране.</p>
+          </section>
+          <section data-sec="anim" hidden>
+            <h4>Скорость анимаций</h4>
+            <label class="sopt col"><select data-set="animSpeed"><option value="0.6">Медленно</option><option value="1">Обычно</option><option value="1.8">Быстро</option><option value="8">Почти без анимаций</option></select></label>
+      <div class="asec"><span class="fdot" style="--fc:#3b82f6"></span>Люди · Жрец — дальняя атака</div>
+      <div class="atiles" data-key="priest">
+        <button class="atile" data-val="prayer" title="Жрец встаёт на колени и молится, с неба бьёт столб света">
+          <svg viewBox="0 0 64 64"><path class="a-gold" d="M42 4v40M50 4v40M46 2v4"/><path class="a-gold" d="M38 8l-3-4M54 8l3-4"/>
+            <circle cx="16" cy="30" r="4"/><path d="M16 34l3 9h-9M19 43l-1 8M16 36l5-6M16 36l-1-7"/>
+            <path class="a-red" d="M46 58c-4 0-5-2-5-4l2-4-1-3a3 3 0 1 1 6 0l-1 3 2 4c0 2-1 4-3 4z"/>
+            <path class="a-gold" d="M24 20l1 2M8 18l1-2M27 30h2"/><ellipse class="a-gold" cx="16" cy="24" rx="5" ry="1.5"/></svg>
+          <span>Молитва</span></button>
+        <button class="atile" data-val="ufo" title="Жрец зовёт НЛО: прожектор поднимает фигуру, она вращается и улетает">
+          <svg viewBox="0 0 64 64"><ellipse cx="32" cy="14" rx="17" ry="5"/><path class="a-cyan" d="M24 12a8 6 0 0 1 16 0"/>
+            <path class="a-green" d="M25 19L15 58M39 19l10 39"/><path class="a-green" d="M18 58h28" stroke-dasharray="2 3"/>
+            <path class="a-red" d="M32 46c-3 0-4-2-4-3l2-3-1-2a3 3 0 1 1 6 0l-1 2 2 3c0 1-1 3-4 3z"/>
+            <path d="M23 37a10 4 0 0 0 18 0M41 37l-2 3M41 37l-3-1"/><path d="M32 32v-6M29 28l3-3 3 3"/></svg>
+          <span>НЛО</span></button>
+        <button class="atile" data-val="lightning" title="Жрец призывает молнию, на клетке остаётся чёрный след">
+          <svg viewBox="0 0 64 64"><path d="M18 18a7 7 0 0 1 6-9 9 9 0 0 1 17 1 6 6 0 0 1 4 11H20a5 5 0 0 1-2-3z"/>
+            <path class="a-cyan" d="M34 22l-7 13h8l-6 14 13-18h-8l5-9z"/>
+            <ellipse class="a-dark" cx="31" cy="56" rx="13" ry="3.5"/><path class="a-gray" d="M22 56l-4-1M40 56l5-2M31 59v3M27 53l-2-3M36 53l3-3"/></svg>
+          <span>Молния</span></button>
+      </div>
+      <div class="asec"><span class="fdot" style="--fc:#dc2626"></span>Демоны · Обелиск — дальняя атака</div>
+      <div class="atiles" data-key="obelisk">
+        <button class="atile" data-val="sink" title="Цель дрожит, её засасывает в доску, по поверхности расходятся красные круги">
+          <svg viewBox="0 0 64 64"><path class="a-red" d="M10 8l5-4 5 4v20h-10z"/><path class="a-red" d="M22 14l8 6M24 22l9 2" stroke-dasharray="2 3"/>
+            <path d="M38 22c-3 0-4-2-4-3l2-3-1-2a3 3 0 1 1 6 0l-1 2 2 3c0 1-1 3-4 3z"/><path d="M31 18l-2-1M47 18l2-1M31 24l-2 1M47 24l2 1"/>
+            <path d="M38 30v8M35 35l3 3 3-3"/>
+            <ellipse class="a-red" cx="38" cy="48" rx="7" ry="2"/><ellipse class="a-red" cx="38" cy="48" rx="15" ry="4.5"/><ellipse class="a-red" cx="38" cy="48" rx="23" ry="7" stroke-dasharray="3 3"/></svg>
+          <span>Трясина</span></button>
+      </div>
+      <div class="ahint">Выбранная анимация срабатывает при дальней атаке фигуры (2-е нажатие на неё). Анимации других фигур появятся позже.</div>
+          </section>
+          <section data-sec="ai" hidden>
+            <h4>Сила компьютера</h4>
+            <label class="sopt"><input type="radio" name="aiDepth" data-set="aiDepth" value="1"> Обычная — думает на 1 ход (быстро)</label>
+            <label class="sopt"><input type="radio" name="aiDepth" data-set="aiDepth" value="3"> Сильная — думает на 3 хода вперёд</label>
+            <h4>Пауза перед ходом компьютера</h4>
+            <label class="sopt col"><select data-set="aiPause"><option value="300">Короткая</option><option value="700">Обычная</option><option value="1500">Длинная</option></select></label>
+          </section>
+          <section data-sec="control" hidden>
+            <h4>Выбор фигуры</h4>
+            <p class="shint">1-е нажатие — фигура приподнимается и показывает ходы. 2-е — способности (если они есть). 3-е — выбор снимается. Если способностей нет, выбор снимается уже 2-м нажатием.</p>
+            <h4>Сдвиг линии ТХ'Зсала</h4>
+            <label class="sopt"><input type="checkbox" data-set="lineConfirm"> Показывать стрелки и спрашивать «Применить»</label>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- сверху по центру: виды камеры и строка состояния -->
+    <div id="hudTC">
+      <div id="views">
+        <button data-preset="iso" class="vbtn on" title="Изометрия (1)" aria-label="Изометрия"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg></button>
+        <button data-preset="angled" class="vbtn" title="Под углом (2)" aria-label="Под углом"><svg viewBox="0 0 24 24"><path d="M7 6h10l4 13H3z"/><path d="M12 6v13M5 12.5h14"/></svg></button>
+        <button data-preset="top" class="vbtn" title="Сверху (3)" aria-label="Сверху"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><path d="M12 4v16M4 12h16"/></svg></button>
+      </div>
+      <div id="banner"></div>
+      <div id="toast" class="hidden"></div>
+    </div>
+
+    <!-- справа вверху: карточка выбранной фигуры -->
+    <button id="pieceBtn" class="hudbtn hidden" title="Описание фигуры" aria-label="Описание фигуры"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>
+    <div id="piecePanel" class="hudpanel hidden"><button id="pieceClose" class="xbtn" aria-label="Закрыть">✕</button><div id="info"></div><div id="legend"></div></div>
+
+    <!-- справа внизу: наставник в режиме обучения -->
+    <div id="tutor" class="hudpanel hidden">
+      <div class="tHead" id="tutorHead"><span class="tAva" id="tutorAva"></span><span class="tName" id="tutorName"></span><button class="tMin" id="tutorMin" aria-label="Свернуть">–</button></div>
+      <div id="tutorLog"></div>
+    </div>
+
+    <!-- снизу слева: игроки -->
+    <div id="players"></div>
+  </div>
+
+  <div id="cards" class="hidden">
+    <div class="cardsHead">
+      <h2>📖 Справочник фигур</h2>
+      <div id="cardTabs"></div>
+      <button id="cardsClose">✕ Закрыть</button>
+    </div>
+    <div class="dlegend">
+      <span><span class="dm m-move"></span> ход</span><span><span class="da a-capture"></span> ближнее взятие</span>
+      <span><span class="da a-ranged"></span> дальняя атака</span><span><span class="da a-convert"></span> превращение</span>
+      <span><span class="dm m-summon"></span> призыв</span><span><span class="dm m-special"></span> особый ход</span>
+      <span class="muted">Схемы — для белых на пустой доске (вперёд = вверх). Пешки показаны с начальной позиции.</span>
+    </div>
+    <div id="cardList"></div>
+  </div>
+
+  <div id="modal" class="overlay hidden"><div class="modalbox"><div id="modalText"></div><div id="modalBtns"></div></div></div>
+  <div id="tip" class="hidden"></div>
+
+  <script>window.FC = { VIEW: 'gl' };</script>
+  <script src="js/engine.js"></script>
+  <script src="js/factions/humans.js"></script>
+  <script src="js/factions/orcs.js"></script>
+  <script src="js/factions/demons.js"></script>
+  <script src="js/factions/undead.js"></script>
+  <script src="js/factions/dwarves.js"></script>
+  <script src="js/factions/elves.js"></script>
+  <script src="js/factions/chthon.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/tutor.js"></script>
+  <script src="js/ui.js"></script>
+  <script type="importmap">{ "imports": { "three": "./js/vendor/three.module.min.js" } }</script>
+  <script type="module" src="js/gl/board3d.js"></script>
+  <script src="js/mobile.js"></script>
+</body>
+</html>

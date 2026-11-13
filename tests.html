@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Fraction Chess — автотест</title>
+<style>body{font-family:Consolas,monospace;background:#111;color:#ddd;padding:20px}table{border-collapse:collapse}td,th{border:1px solid #444;padding:4px 8px}.err{color:#f87171}</style></head>
+<body>
+<h2>Автотест: случайные/ИИ-партии всех пар фракций</h2>
+<div id="out">Выполняется…</div>
+<script src="js/engine.js"></script>
+<script src="js/factions/humans.js"></script>
+<script src="js/factions/orcs.js"></script>
+<script src="js/factions/demons.js"></script>
+<script src="js/factions/undead.js"></script>
+  <script src="js/factions/dwarves.js"></script>
+  <script src="js/factions/elves.js"></script>
+  <script src="js/factions/chthon.js"></script>
+<script src="js/ai.js"></script>
+<script>
+FC.AI.depth = 1;   // массовые партии — быстрая оценка на 1 ход (поиск на 3 хода проверяется отдельным тестом)
+
+const GAMES = 2, MAX_PLIES = 200;
+const ids = Object.keys(FC.FACTIONS);
+const res = { errors: [], rows: [] };
+function play(f0, f1, smart) {
+  const G = new FC.Game(f0, f1);
+  G.turn = Math.random() < .5 ? 0 : 1;
+  for (let i = 0; i < MAX_PLIES && G.winner == null; i++) {
+    let a;
+    if (smart) a = FC.AI.choose(G, G.turn);
+    else { const acts = G.allActions(G.turn); a = acts[Math.floor(Math.random() * acts.length)]; }
+    if (!a) break;
+    G.doAction(a);
+    let p, guard = 0;
+    while (G.winner == null && (p = G.nextPending()) && guard++ < 20) G.resolvePending(FC.AI.resolve(G, p));
+    G.queue = [];
+    if (G.winner == null) G.endTurn();
+    // инварианты
+    for (const o of [0, 1]) if (G.winner == null && !G.leader(o)) throw new Error('Лидер исчез без победы');
+    const ids2 = G.allPieces().map(o => o.p.id); if (new Set(ids2).size !== ids2.length) throw new Error('Дубль фигуры');
+  }
+  return G;
+}
+/* ---- точечные проверки правил ---- */
+function empty(f0, f1) { const G = new FC.Game(f0, f1); for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) G.board[y][x] = null; return G; }
+const at = (G, x, y) => G.legalActionsFor(x, y, 'normal').acts.concat(G.legalActionsFor(x, y, 'special').acts);
+const CHECKS = [
+  ['Король не может ходить под шах', () => {
+    const G = empty('humans', 'humans'); G.spawn('king', 0, 4, 0); G.spawn('king', 1, 4, 7); G.spawn('rook', 1, 3, 7);
+    return !at(G, 4, 0).some(a => a.x === 3 && (a.kind === 'move' || a.kind === 'capture'));
+  }],
+  ['Нельзя оставлять лидера под шахом (связка)', () => {
+    const G = empty('humans', 'humans'); G.spawn('king', 0, 4, 0); G.spawn('rook', 0, 4, 1); G.spawn('king', 1, 0, 7); G.spawn('rook', 1, 4, 7);
+    return at(G, 4, 1).every(a => a.x === 4);
+  }],
+  ['Лидер под шахом может уничтожить атакующего особой атакой', () => {
+    const G = empty('orcs', 'humans'); G.spawn('shaman', 0, 6, 1); G.spawn('king', 1, 3, 7); G.spawn('queen', 1, 6, 3);
+    return G.leaderThreatened(0) && G.legalActionsFor(6, 1, 'special').acts.some(a => a.kind === 'ranged' && a.x === 6 && a.y === 3);
+  }],
+  ['Ничья при троекратном повторении позиции', () => {
+    const G = empty('humans', 'humans'); G.spawn('king', 0, 0, 0); G.spawn('king', 1, 7, 7); G.spawn('rook', 0, 3, 3); G.spawn('rook', 1, 4, 4);
+    const mv = (fx, fy, tx, ty) => { G.doAction(G.legalActionsFor(fx, fy, 'normal').acts.find(a => a.x === tx && a.y === ty)); G.endTurn(); };
+    // ладьи ходят туда-обратно: позиции повторяются
+    const seq = [[3, 3, 3, 2], [4, 4, 4, 5], [3, 2, 3, 3], [4, 5, 4, 4], [3, 3, 3, 2], [4, 4, 4, 5], [3, 2, 3, 3], [4, 5, 4, 4], [3, 3, 3, 2]];
+    let i = 0; for (; i < seq.length && G.winner == null; i++) mv(...seq[i]);
+    return G.winner === -1 && /повторилась/.test(G.winReason) && i === 9;
+  }],
+  ['Ничья после 50 ходов без взятий', () => {
+    const G = empty('humans', 'humans'); G.spawn('king', 0, 0, 0); G.spawn('king', 1, 7, 7); G.spawn('rook', 0, 3, 3);
+    G.quietPlies = 99;
+    G.doAction(G.legalActionsFor(3, 3, 'normal').acts.find(a => a.kind === 'move')); G.endTurn();
+    const drawn = G.winner === -1 && /50 ходов/.test(G.winReason);
+    const H = empty('humans', 'humans'); H.spawn('king', 0, 0, 0); H.spawn('king', 1, 7, 7); H.spawn('rook', 0, 3, 3); H.spawn('pawn', 1, 3, 6);
+    H.quietPlies = 99;
+    H.doAction(H.legalActionsFor(3, 3, 'normal').acts.find(a => a.kind === 'capture')); H.endTurn();
+    return drawn && H.winner == null && H.quietPlies === 0;
+  }],
+  ['Мат завершает партию', () => {
+    // шах конём (призыв пешки не закрывает) + ладьи держат все поля отступления
+    const G = empty('humans', 'humans'); G.spawn('king', 0, 0, 0); G.spawn('king', 1, 7, 7); G.spawn('knight', 1, 1, 2); G.spawn('rook', 1, 7, 0); G.spawn('rook', 1, 6, 1);
+    G.turn = 1; G.endTurn(); return G.winner === 1 && /Мат/.test(G.winReason);
+  }],
+  ['Король демонов может вставать под удар', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('demon_king', 0, 4, 3); G.spawn('king', 1, 7, 7); G.spawn('rook', 1, 3, 7);
+    return at(G, 4, 3).some(a => a.x === 3 && a.y === 3);
+  }],
+  ['Возрождение Короля демонов занимает ход', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('imp', 0, 1, 0); G.spawn('demon_king', 0, 4, 5); G.spawn('king', 1, 7, 7); G.spawn('queen', 1, 4, 7);
+    G.turn = 1; G.doAction(at(G, 4, 7).find(a => a.x === 4 && a.y === 5)); G.endTurn();
+    const acts = G.allActions(0);
+    if (!acts.length || !acts.every(a => a.revive)) return false;
+    G.doAction(acts[0]); G.endTurn();
+    return G.turn === 1 && G.pieces(0).some(o => o.p.type === 'demon_king') && !G.players[0].reviveDue;
+  }],
+  ['Без жертвы Демоны проигрывают', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('demon_king', 0, 4, 5); G.spawn('king', 1, 7, 7); G.spawn('queen', 1, 4, 7);
+    G.turn = 1; G.doAction(at(G, 4, 7).find(a => a.x === 4 && a.y === 5)); G.endTurn(); return G.winner === 1;
+  }],
+  ['У каждой фигуры Демонов свой похищенный ход', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('king', 1, 7, 7);
+    const g1 = G.spawn('guard', 0, 2, 2), d1 = G.spawn('demon_king', 0, 5, 2); G.spawn('summoner', 0, 0, 0);
+    G.spawn('imp', 0, 2, 4); G.spawn('knight', 1, 5, 5);
+    G.doAction(at(G, 2, 2).find(a => a.x === 2 && a.y === 4)); G.endTurn(); G.turn = 0;
+    G.doAction(at(G, 5, 2).find(a => a.x === 5 && a.y === 5));
+    return g1.stolen === 'imp' && d1.stolen === 'knight';
+  }],
+  ['Отмена хода восстанавливает позицию', () => {
+    const G = new FC.Game('orcs', 'undead'); const before = JSON.stringify(G.board);
+    for (let i = 0; i < 6 && G.winner == null; i++) { const a = FC.AI.choose(G, G.turn); if (!a) break; G.doAction(a); let p; while ((p = G.nextPending())) G.resolvePending(FC.AI.resolve(G, p)); G.endTurn(); }
+    while (G.undo()); return JSON.stringify(G.board) === before && G.turn === 0 && G.turnNo === 1;
+  }],
+  ['Ход вперёд возвращает отменённые ходы', () => {
+    const G = new FC.Game('demons', 'undead');
+    for (let i = 0; i < 8 && G.winner == null; i++) { const a = FC.AI.choose(G, G.turn); if (!a) break; G.doAction(a); let p; while ((p = G.nextPending())) G.resolvePending(FC.AI.resolve(G, p)); G.endTurn(); }
+    const end = JSON.stringify(G.board), logs = G.logs.join('|'), tn = G.turnNo;
+    while (G.undo()); while (G.redo());
+    const ok1 = JSON.stringify(G.board) === end && G.logs.join('|') === logs && G.turnNo === tn;
+    G.undo(); G.undo(); const a = FC.AI.choose(G, G.turn); G.doAction(a);
+    return ok1 && G.future.length === 0;
+  }],
+  ['Орки: Орк-воин ходит на 5; двойной прорыв у Орка-воина, Вождя и Плута', () => {
+    const G = empty('orcs', 'humans'); G.spawn('shaman', 0, 7, 0); G.spawn('king', 1, 7, 7); G.spawn('orc_warrior', 0, 0, 0);
+    const ys = at(G, 0, 0).filter(a => a.x === 0).map(a => a.y);
+    G.spawn('pawn', 1, 0, 2); G.spawn('pawn', 1, 0, 4);
+    const w = G.legalActionsFor(0, 0, 'special').acts.find(a => a.hits && a.hits.length === 2 && a.x === 0 && a.y === 4); if (!w) return false;
+    G.doAction(w);
+    const wOk = !G.at(0, 2) && G.at(0, 5) && G.at(0, 5).type === 'orc_warrior';
+    const H = empty('orcs', 'humans'); H.spawn('shaman', 0, 7, 0); H.spawn('king', 1, 7, 7); H.spawn('chief', 0, 3, 0); H.spawn('pawn', 1, 3, 2); H.spawn('pawn', 1, 3, 4);
+    const ch = H.legalActionsFor(3, 0, 'special').acts.some(a => a.hits && a.hits.length === 2 && a.x === 3 && a.y === 4);
+    const R = empty('orcs', 'humans'); R.spawn('shaman', 0, 7, 0); R.spawn('king', 1, 7, 7); R.spawn('rogue', 0, 0, 0); R.spawn('pawn', 1, 1, 1); R.spawn('pawn', 1, 3, 3);
+    const ro = R.legalActionsFor(0, 0, 'special').acts.find(a => a.hits && a.hits.length === 2 && a.x === 3 && a.y === 3); if (!ro) return false;
+    R.doAction(ro);
+    return Math.max(...ys) === 5 && wOk && ch && R.at(4, 4) && R.at(4, 4).type === 'rogue';
+  }],
+  ['Гоблин-плут: как слон, прыгает только через своих, «Прорыв» с шагом вперёд', () => {
+    const G = empty('orcs', 'humans'); G.spawn('shaman', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('rogue', 0, 0, 0); G.spawn('goblin', 0, 1, 1); G.spawn('pawn', 1, 3, 3); G.spawn('pawn', 1, 5, 5);
+    const t = G.legalActionsFor(0, 0, 'normal').acts.map(a => a.x + ',' + a.y);
+    if (!t.includes('2,2') || !t.includes('3,3') || t.includes('4,4') || t.includes('5,5')) return false;   // через своего — да, через врага — нет
+    G.doAction(G.legalActionsFor(0, 0, 'normal').acts.find(a => a.x === 3 && a.y === 3));
+    const stepped = G.at(4, 4) && G.at(4, 4).type === 'rogue' && !G.at(3, 3);
+    const H = empty('orcs', 'humans'); H.spawn('shaman', 0, 7, 0); H.spawn('king', 1, 7, 7);
+    H.spawn('rogue', 0, 0, 0); H.spawn('pawn', 1, 2, 2); H.spawn('pawn', 1, 3, 3);
+    H.doAction(H.legalActionsFor(0, 0, 'normal').acts.find(a => a.x === 2 && a.y === 2));
+    return stepped && H.at(2, 2) && H.at(2, 2).type === 'rogue';                                            // дальше занято — остаётся
+  }],
+  ['Хоп-гоблин ест две фигуры вплотную', () => {
+    const G = empty('orcs', 'humans'); G.spawn('shaman', 0, 7, 0); G.spawn('king', 1, 7, 7); G.spawn('hop_goblin', 0, 3, 2); G.spawn('pawn', 1, 3, 3); G.spawn('pawn', 1, 3, 4);
+    const a = at(G, 3, 2).find(a => a.hits && a.hits.length === 2); if (!a) return false;
+    G.doAction(a); return !G.at(3, 3) && G.at(3, 4) && G.at(3, 4).type === 'hop_goblin';
+  }],
+  ['Гоблин, Плут и Всадник не едят две фигуры', () => {
+    const G = empty('orcs', 'humans'); G.spawn('shaman', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('goblin', 0, 0, 2); G.spawn('pawn', 1, 0, 3); G.spawn('pawn', 1, 0, 4);
+    G.spawn('rogue', 0, 3, 0); G.spawn('pawn', 1, 4, 1); G.spawn('pawn', 1, 5, 2);
+    G.spawn('rider', 0, 6, 4); G.spawn('pawn', 1, 7, 6); G.spawn('pawn', 1, 7, 7 - 0);
+    return ![[0, 2], [3, 0], [6, 4]].some(([x, y]) => at(G, x, y).some(a => a.hits && a.hits.length === 2));
+  }],
+  ['Орки не берут лидера вторым взятием', () => {
+    // Вождь: пешка вплотную, за ней король — двойного взятия быть не должно, и это не шах
+    const G = empty('orcs', 'humans'); G.spawn('shaman', 0, 7, 0); G.spawn('chief', 0, 3, 2); G.spawn('pawn', 1, 3, 3); G.spawn('king', 1, 3, 4);
+    const noDouble = !G.legalActionsFor(3, 2, 'normal').acts.concat(G.legalActionsFor(3, 2, 'special').acts).some(a => a.hits && a.hits.some(h => h[0] === 3 && h[1] === 4));
+    return noDouble && !G.leaderThreatened(1);
+  }],
+  ['Всадник: нет прыжка «2 вперёд + 1 вбок», есть «3 вперёд + 1 вбок»', () => {
+    const G = empty('orcs', 'humans'); G.spawn('shaman', 0, 7, 0); G.spawn('king', 1, 7, 7); G.spawn('rider', 0, 3, 3);
+    const t = new Set(at(G, 3, 3).map(a => (a.x - 3) + ',' + (a.y - 3)));
+    const B = new FC.Game('humans', 'orcs'); for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) B.board[y][x] = null;
+    B.spawn('king', 0, 7, 0); B.spawn('shaman', 1, 0, 7); B.spawn('rider', 1, 3, 4);   // чёрные: «вперёд» — вниз
+    const tb = new Set(at(B, 3, 4).map(a => (a.x - 3) + ',' + (a.y - 4)));
+    return !t.has('1,2') && !t.has('-1,2') && t.has('1,3') && t.has('-1,3') && t.has('2,1') && t.has('-2,1')
+      && !tb.has('1,-2') && tb.has('1,-3') && tb.has('2,-1');
+  }],
+  ['Король людей призывает Пешку вместо хода', () => {
+    const G = empty('humans', 'orcs'); G.spawn('king', 0, 4, 0); G.spawn('shaman', 1, 7, 7); G.spawn('pawn', 0, 4, 1);
+    const acts = G.legalActionsFor(4, 0, 'special').acts.filter(a => a.kind === 'summon');
+    if (acts.length !== 4) return false;              // 5 соседних клеток, одна занята своей пешкой
+    G.doAction(acts.find(a => a.x === 3 && a.y === 1));
+    const p = G.at(3, 1);
+    return p && p.type === 'pawn' && p.owner === 0 && !!G.at(4, 0) && !G.legalActionsFor(3, 1, 'normal').acts.some(a => a.y === 3);
+  }],
+  ['Призыв Пешек: не больше 8 на доске', () => {
+    const G = empty('humans', 'orcs'); G.spawn('king', 0, 4, 0); G.spawn('shaman', 1, 7, 7);
+    for (let x = 0; x < 7; x++) G.spawn('pawn', 0, x, 3);                       // 7 пешек — призыв ещё можно
+    const can7 = G.legalActionsFor(4, 0, 'special').acts.some(a => a.kind === 'summon');
+    G.spawn('pawn', 0, 7, 3);                                                     // 8 пешек — уже нельзя
+    return can7 && !G.legalActionsFor(4, 0, 'special').acts.some(a => a.kind === 'summon');
+  }],
+  ['Призыв Пешек: не больше 16 за партию', () => {
+    const G = empty('humans', 'orcs'); G.spawn('king', 0, 4, 0); G.spawn('shaman', 1, 7, 7);
+    let n = 0;
+    for (let i = 0; i < 20; i++) {
+      const a = G.legalActionsFor(4, 0, 'special').acts.find(a => a.kind === 'summon');
+      if (!a) break;
+      G.doAction(a); n++;
+      const p = G.at(a.x, a.y); G.board[a.y][a.x] = null;                         // пешку сразу «съели», чтобы не упереться в лимит 8
+    }
+    return n === 16 && G.players[0].pawnSummons === 16;
+  }],
+  ['Призыв Пешки закрывает от шаха', () => {
+    const G = empty('humans', 'orcs'); G.spawn('king', 0, 4, 0); G.spawn('shaman', 1, 0, 7); G.spawn('chief', 1, 4, 5);
+    const acts = G.legalActionsFor(4, 0, 'special').acts;
+    return G.leaderThreatened(0) && acts.length === 1 && acts[0].x === 4 && acts[0].y === 1;
+  }],
+  ['Нежить: не больше 12 Скелетов (призыв и превращение)', () => {
+    const G = empty('undead', 'humans'); G.spawn('phylactery', 0, 0, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('graveyard', 0, 4, 2); G.spawn('lich', 0, 7, 0); G.spawn('pawn', 1, 7, 4);
+    for (let i = 0; i < 11; i++) G.spawn('skeleton', 0, i % 4, 4 + Math.floor(i / 4));   // 11 Скелетов
+    const sum11 = G.legalActionsFor(4, 2, 'special').acts.some(a => a.kind === 'summon');
+    const conv11 = G.legalActionsFor(7, 0, 'special').acts.some(a => a.kind === 'convert');
+    G.spawn('skeleton', 0, 3, 6);                                                         // 12-й
+    const sum12 = G.legalActionsFor(4, 2, 'special').acts.some(a => a.kind === 'summon');
+    const conv12 = G.legalActionsFor(7, 0, 'special').acts.some(a => a.kind === 'convert');
+    return sum11 && conv11 && !sum12 && !conv12;
+  }],
+  ['Лича можно возродить только один раз', () => {
+    const G = empty('undead', 'humans'); G.spawn('phylactery', 0, 4, 0); G.spawn('king', 1, 7, 7); G.players[0].queenCaptured = true;
+    const a1 = G.legalActionsFor(4, 0, 'special').acts; if (!a1.length) return false;
+    G.doAction(a1[0]); const l = G.pieces(0).find(o => o.p.type === 'lich'); G.board[l.y][l.x] = null;   // Лич снова погиб
+    return G.legalActionsFor(4, 0, 'special').acts.length === 0 && G.players[0].lichRevived;
+  }],
+  ['Всадник назад — только «2 вбок + 1 назад»', () => {
+    const G = empty('orcs', 'humans'); G.spawn('shaman', 0, 7, 0); G.spawn('king', 1, 7, 7); G.spawn('rider', 0, 3, 3);
+    const d = at(G, 3, 3).map(a => [a.x - 3, a.y - 3]);
+    const B = new FC.Game('humans', 'orcs'); for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) B.board[y][x] = null;
+    B.spawn('king', 0, 7, 0); B.spawn('shaman', 1, 0, 7); B.spawn('rider', 1, 3, 4);
+    const db = at(B, 3, 4).map(a => [a.x - 3, a.y - 4]);
+    const back = (arr, s) => arr.filter(([, dy]) => dy * s < 0);
+    const okBack = (arr, s) => back(arr, s).length === 2 && back(arr, s).every(([dx, dy]) => Math.abs(dx) === 2 && dy === -s);
+    return d.length === 6 && okBack(d, 1) && db.length === 6 && okBack(db, -1);
+  }],
+  ['Люди: «Строй» только у Пешек (ход соседа, не дальше 2)', () => {
+    const G = empty('humans', 'orcs'); G.spawn('king', 0, 7, 0); G.spawn('shaman', 1, 7, 7);
+    G.spawn('pawn', 0, 3, 3); G.spawn('priest', 0, 4, 3); G.spawn('knight', 0, 2, 3);
+    const pw = G.legalActionsFor(3, 3, 'special').acts.filter(a => a.borrowed).map(a => [a.x - 3, a.y - 3]);
+    const diag = pw.filter(([dx, dy]) => Math.abs(dx) === Math.abs(dy));
+    const knightLike = pw.filter(([dx, dy]) => Math.abs(dx) * Math.abs(dy) === 2);
+    const pawnOk = diag.some(([dx]) => Math.abs(dx) === 2) && !pw.some(([dx, dy]) => Math.max(Math.abs(dx), Math.abs(dy)) > 2) && knightLike.length > 0;
+    const others = [[4, 3], [2, 3]].every(([x, y]) => !G.legalActionsFor(x, y, 'special').acts.some(a => a.borrowed));
+    return pawnOk && others;
+  }],
+  ['Люди: «Строй» не даёт Пешке ходить назад (белые и чёрные)', () => {
+    const G = empty('humans', 'orcs'); G.spawn('king', 0, 7, 0); G.spawn('shaman', 1, 7, 7);
+    G.spawn('pawn', 0, 3, 3, { moved: true }); G.spawn('queen', 0, 2, 3); G.spawn('knight', 0, 4, 4);
+    const w = G.legalActionsFor(3, 3, 'special').acts.filter(a => a.borrowed);
+    const B = empty('orcs', 'humans'); B.spawn('shaman', 0, 7, 0); B.spawn('king', 1, 7, 7);
+    B.spawn('pawn', 1, 3, 4, { moved: true }); B.spawn('queen', 1, 2, 4); B.turn = 1;
+    const b = B.legalActionsFor(3, 4, 'special').acts.filter(a => a.borrowed);
+    return w.length > 0 && w.every(a => a.y >= 3 && Math.max(Math.abs(a.x - 3), Math.abs(a.y - 3)) <= 2)
+      && b.length > 0 && b.every(a => a.y <= 4);
+  }],
+  ['Нежить: Скелет-воин не бьёт сквозь фигуры и не перепрыгивает', () => {
+    const G = empty('undead', 'humans'); G.spawn('phylactery', 0, 0, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('skeleton_warrior', 0, 3, 3); G.spawn('skeleton', 0, 3, 4); G.spawn('pawn', 1, 3, 5); G.spawn('pawn', 1, 4, 3); G.spawn('pawn', 1, 5, 3);
+    const acts = ['normal', 'special'].flatMap(m => G.legalActionsFor(3, 3, m).acts);
+    const at = (x, y) => acts.some(a => a.x === x && a.y === y);
+    return !at(3, 5) && !at(3, 4) && at(4, 3) && !at(5, 3);
+  }],
+  ['Демоны: Кровожадность держится до использования и спадает после', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('imp', 0, 3, 2, { moved: true }); G.spawn('pawn', 1, 4, 3); G.spawn('pawn', 1, 4, 6); G.spawn('pawn', 1, 6, 6);
+    G.doAction(G.legalActionsFor(3, 2, 'normal').acts.find(a => a.x === 4 && a.y === 3));      // Имп берёт пешку
+    const imp = G.at(4, 3); if (!imp || imp.bloodlust <= 0) return false;
+    for (let i = 0; i < 6; i++) { G.endTurn(); }                                                  // несколько ходов не использует
+    if (imp.bloodlust <= 0) return false;
+    G.turn = 0;
+    const bl = G.legalActionsFor(4, 3, 'special').acts.find(a => a.x === 4 && a.y === 5);
+    if (bl) return false;                                                                          // на 4,5 пусто — цели нет
+    G.board[5][4] = null; G.spawn('rook', 1, 4, 5);
+    const a = G.legalActionsFor(4, 3, 'special').acts.find(a => a.x === 4 && a.y === 5); if (!a) return false;
+    G.doAction(a);
+    return G.at(4, 5).type === 'imp' && G.at(4, 5).bloodlust === 0;
+  }],
+  ['Пешка на дальнем краю любым способом превращается (сдвиг линии, рокировка Трента, появление)', () => {
+    // сдвиг ТХ'Зсала переносит пешку соперника на её дальний край
+    const G = empty('chthon', 'orcs'); G.spawn('tx', 0, 7, 0); G.spawn('shaman', 1, 7, 7);
+    G.spawn('goblin', 1, 3, 1, { moved: true });              // чёрный гоблин на 2-м ряду, его край — ряд 1 (y=0)
+    const sh = G.legalActionsFor(7, 0, 'special').acts.find(a => /столбец d вниз/.test(a.label)); if (!sh) return false;
+    G.doAction(sh);
+    const a1 = G.at(3, 0) && G.at(3, 0).type === 'hop_goblin';
+    // рокировка Трента ставит лучника на дальний ряд
+    const H = empty('elves', 'humans'); H.spawn('elf_queen', 0, 7, 0); H.spawn('king', 1, 7, 7);
+    H.spawn('trent', 0, 0, 7); H.spawn('archer', 0, 0, 6);
+    H.doAction(H.legalActionsFor(0, 7, 'special').acts.find(a => a.x === 0 && a.y === 6));
+    const a2 = H.at(0, 7) && H.at(0, 7).type === 'elite_archer';
+    // мехпешка, созданная прямо на краю, сразу становится механическим ферзём
+    const D = empty('dwarves', 'humans'); D.spawn('dw_king', 0, 7, 0); D.spawn('king', 1, 7, 7); D.spawn('dw_pawn', 0, 3, 6, { moved: true });
+    D.doAction(D.legalActionsFor(3, 6, 'special').acts.find(a => a.kind === 'summon'));
+    const a3 = D.at(3, 7) && D.at(3, 7).type === 'mech_queen';
+    // пешка людей: выбор превращения появляется один раз
+    const P = empty('chthon', 'humans'); P.spawn('tx', 0, 7, 0); P.spawn('king', 1, 7, 7); P.spawn('pawn', 1, 2, 1, { moved: true });
+    P.doAction(P.legalActionsFor(7, 0, 'special').acts.find(a => /столбец c вниз/.test(a.label)));
+    const a4 = P.queue.length === 1 && P.at(2, 0).promoPending;
+    return a1 && a2 && a3 && a4;
+  }],
+  ['Пат — поражение того, кому некуда ходить', () => {
+    const G = empty('humans', 'humans'); G.spawn('king', 0, 0, 0); G.spawn('king', 1, 7, 7); G.spawn('queen', 1, 1, 3);
+    G.players[0].pawnSummons = 16;                     // призыв Пешек исчерпан — у белых только Король
+    G.turn = 1;
+    G.doAction(G.legalActionsFor(1, 3, 'normal').acts.find(a => a.x === 1 && a.y === 2));   // ферзь b4 → b3: пат
+    G.endTurn();
+    return G.winner === 1 && /Пат/.test(G.winReason) && !G.leaderThreatened(0);
+  }],
+  ['ИИ с поиском на 3 хода находит мат в 2 хода (две ладьи)', () => {
+    const play3 = () => {
+      const G = empty('humans', 'humans'); G.spawn('king', 0, 7, 0); G.spawn('rook', 0, 0, 5); G.spawn('rook', 0, 1, 4); G.spawn('king', 1, 4, 7);
+      G.players[1].pawnSummons = 16;                       // у чёрных только Король, призыв Пешек исчерпан
+      for (let i = 0; i < 3 && G.winner == null; i++) {
+        FC.AI.depth = G.turn === 0 ? 3 : 1;
+        const a = FC.AI.choose(G, G.turn); if (!a) break;
+        G.doAction(a); G.queue = []; G.endTurn();
+      }
+      return G.winner === 0;
+    };
+    try { return play3() && play3() && play3(); } finally { FC.AI.depth = 1; }
+  }],
+  ['ИИ видит пат сопернику как победу', () => {
+    const G = empty('humans', 'humans'); G.spawn('king', 0, 0, 0); G.spawn('king', 1, 7, 7); G.spawn('queen', 1, 1, 3);
+    G.players[0].pawnSummons = 16; G.turn = 1;
+    const a = FC.AI.choose(G, 1);
+    G.doAction(a); G.endTurn();
+    return G.winner === 1;
+  }],
+  /* ===== Дварфы ===== */
+  ['Дварфы: пешка без двойного хода, создаёт не больше 2 механических пешек', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('dw_pawn', 0, 3, 1);
+    if (G.legalActionsFor(3, 1, 'normal').acts.some(a => a.y === 3)) return false;
+    const mk = () => { const a = G.legalActionsFor(3, 1, 'special').acts.find(a => a.kind === 'summon'); if (!a) return false; G.doAction(a); G.board[2][3] = null; return true; };
+    return mk() && mk() && !mk() && G.at(3, 1).made === 2;
+  }],
+  ['Дварфы: механическая пешка берёт прямо и уничтожается; на краю — механический ферзь', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('mech_pawn', 0, 2, 3, { dir: 1, maker: 99 }); G.spawn('knight', 1, 2, 4);
+    G.doAction(G.legalActionsFor(2, 3, 'normal').acts.find(a => a.kind === 'capture'));
+    const gone = !G.at(2, 4) && !G.at(2, 3);
+    G.spawn('mech_pawn', 0, 4, 6, { dir: 1, maker: 99 });
+    G.doAction(G.legalActionsFor(4, 6, 'normal').acts.find(a => a.y === 7));
+    const q = G.at(4, 7); if (!q || q.type !== 'mech_queen') return false;
+    G.spawn('rook', 1, 4, 3);
+    G.doAction(G.legalActionsFor(4, 7, 'normal').acts.find(a => a.kind === 'capture' && a.y === 3));
+    return gone && !G.at(4, 3) && !G.at(4, 7);
+  }],
+  ['Дварфы: Инженер ходит на 1 в любую сторону, одна мехпешка за раз, идущая назад', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('engineer', 0, 3, 7);
+    const mv = G.legalActionsFor(3, 7, 'normal').acts.length === 5;
+    const a = G.legalActionsFor(3, 7, 'special').acts.find(a => a.kind === 'summon'); if (!a || a.y !== 6) return false;
+    G.doAction(a);
+    const m = G.at(3, 6); if (!m || m.dir !== -1) return false;
+    const second = G.legalActionsFor(3, 7, 'special').acts.some(a => a.kind === 'summon');
+    const back = G.legalActionsFor(3, 6, 'normal').acts.some(a => a.x === 3 && a.y === 5);
+    return mv && !second && back;
+  }],
+  ['Дварфы: механический слон — до 3 клеток, не берёт; повторный призыв разбирает старого', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('dw_bishop', 0, 3, 3);
+    G.doAction(G.legalActionsFor(3, 3, 'special').acts.find(a => a.x === 4 && a.y === 4));
+    G.spawn('pawn', 1, 6, 6);
+    const acts = G.legalActionsFor(4, 4, 'normal').acts;
+    const ok1 = !acts.some(a => a.kind === 'capture') && acts.every(a => Math.abs(a.x - 4) <= 3);
+    G.doAction(G.legalActionsFor(3, 3, 'special').acts.find(a => a.x === 2 && a.y === 2));
+    return ok1 && !G.at(4, 4) && G.at(2, 2) && G.at(2, 2).type === 'mech_bishop';
+  }],
+  ['Дварфы: Дварф-ладья ходит только вместе со своей механической ладьёй', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    const r = G.spawn('dw_rook', 0, 0, 3);
+    G.spawn('mech_rook', 0, 4, 4, { maker: r.id });
+    // механизм на e5 зажат со всех сторон по вертикали и горизонтали
+    for (const [x, y] of [[3, 4], [5, 4], [4, 3], [4, 5]]) G.spawn('dw_pawn', 0, x, y);
+    const blocked = G.legalActionsFor(0, 3, 'normal').acts.length === 0;
+    const selfOk = G.legalActionsFor(4, 4, 'normal').acts.length === 0;
+    G.board[3][4] = null;                                   // освобождаем e4 — механизм может сходить
+    const a = G.legalActionsFor(0, 3, 'normal').acts.find(a => a.x === 0 && a.y === 5); if (!a) return false;
+    G.doAction(a);
+    const pend = G.nextPending(); if (!pend || pend.kind !== 'cells') return false;
+    G.resolvePending(pend.cells[0]);
+    return blocked && selfOk && !G.at(4, 4) && G.at(0, 5).type === 'dw_rook';
+  }],
+  ['Дварфы: Дварф-ферзь держит не больше 3 механизмов, они берут и разрушаются', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('dw_queen', 0, 3, 0);
+    for (let i = 0; i < 3; i++) {
+      const a = G.legalActionsFor(3, 0, 'special').acts.find(a => a.kind === 'summon' && /ладья/.test(a.label)); if (!a) return false;
+      G.doAction(a); const m = G.at(a.x, a.y); G.board[a.y][a.x] = null; G.board[2 + i][0] = m;
+    }
+    const fourth = G.legalActionsFor(3, 0, 'special').acts.some(a => a.kind === 'summon');
+    G.spawn('pawn', 1, 0, 6);
+    const cap = G.legalActionsFor(0, 4, 'normal').acts.find(a => a.kind === 'capture' && a.y === 6); if (!cap) return false;
+    G.doAction(cap);
+    return !fourth && !G.at(0, 6) && !G.at(0, 4);
+  }],
+  ['Дварфы: кабан не прыгает через две фигуры подряд; мехконь — один за раз, 2 за партию', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('boar', 0, 3, 3); G.spawn('pawn', 1, 3, 4);
+    const one = G.legalActionsFor(3, 3, 'normal').acts.some(a => a.x === 4 && a.y === 5);
+    G.spawn('pawn', 1, 3, 5);
+    const two = G.legalActionsFor(3, 3, 'normal').acts.some(a => a.x === 4 && a.y === 5);
+    G.board[4][3] = null; G.board[5][3] = null;
+    const mk = () => { const a = G.legalActionsFor(3, 3, 'special').acts.find(a => a.kind === 'summon'); if (!a) return null; G.doAction(a); return G.find(G.nextId - 1); };
+    const m1 = mk(); if (!m1) return false;
+    const whileAlive = !G.legalActionsFor(3, 3, 'special').acts.some(a => a.kind === 'summon');
+    G.board[m1.y][m1.x] = null;
+    const m2 = mk(); if (!m2) return false; G.board[m2.y][m2.x] = null;
+    return one && !two && whileAlive && !mk();
+  }],
+  ['Дварфы: Королевский механизм + механический ферзь = победа на следующем ходу', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 4, 0); G.spawn('king', 1, 7, 7);
+    G.doAction(G.legalActionsFor(4, 0, 'special').acts.find(a => a.x === 4 && a.y === 1));
+    const again = G.legalActionsFor(4, 0, 'special').acts.some(a => a.kind === 'summon');
+    G.spawn('mech_queen', 0, 5, 2, { maker: 1 });
+    const m = G.legalActionsFor(4, 1, 'special').acts.find(a => /Великий/.test(a.label)); if (!m) return false;
+    G.doAction(m); G.endTurn();
+    if (G.winner != null) return false;
+    G.doAction(G.legalActionsFor(7, 7, 'normal').acts.find(a => a.x === 7 && a.y === 6)); G.endTurn();
+    return !again && G.winner === 0;
+  }],
+  ['Дварфы: механизм + Королевский механизм → улучшенный механизм под контролем призывателя', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    const r = G.spawn('dw_rook', 0, 0, 0); G.spawn('mech_rook', 0, 0, 3, { maker: r.id }); G.spawn('royal_mech', 0, 2, 3, { maker: 1 });
+    const m = G.legalActionsFor(0, 3, 'normal').acts.find(a => a.x === 2 && a.y === 3 && /Королевским/.test(a.label)); if (!m) return false;
+    G.doAction(m);
+    const up = G.at(2, 3); if (!up || up.type !== 'up_mech_rook' || up.maker !== r.id) return false;
+    G.spawn('pawn', 1, 2, 7);
+    const far = G.legalActionsFor(2, 3, 'normal').acts.some(a => a.kind === 'capture' && a.x === 2 && a.y === 7);
+    const noNew = !G.legalActionsFor(0, 0, 'special').acts.some(a => a.kind === 'summon');
+    const kingNew = G.legalActionsFor(7, 0, 'special').acts.some(a => a.kind === 'summon');   // Королевского механизма больше нет — можно новый
+    // ход призывателя тянет за собой улучшенный механизм
+    const mv = G.legalActionsFor(0, 0, 'normal').acts.find(a => a.x === 0 && a.y === 2); if (!mv) return false;
+    G.doAction(mv);
+    const pend = G.nextPending();
+    return far && noNew && kingNew && pend && pend.kind === 'cells';
+  }],
+  ['Дварфы: Королевский механизм встаёт на мехслона → улучшенный слон; на мехконя → конь 3+1', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    const b = G.spawn('dw_bishop', 0, 0, 7); G.spawn('mech_bishop', 0, 3, 3, { maker: b.id }); G.spawn('royal_mech', 0, 4, 4, { maker: 1 });
+    const a = G.legalActionsFor(4, 4, 'normal').acts.find(a => a.x === 3 && a.y === 3 && a.kind === 'special'); if (!a) return false;
+    G.doAction(a);
+    const ub = G.at(3, 3); if (!ub || ub.type !== 'up_mech_bishop') return false;
+    const longDiag = G.legalActionsFor(3, 3, 'normal').acts.some(a => a.x === 7 && a.y === 7 - 0 - 0 && false) || G.legalActionsFor(3, 3, 'normal').acts.some(a => a.x === 6 && a.y === 6);
+    const H = empty('dwarves', 'humans'); H.spawn('dw_king', 0, 7, 0); H.spawn('king', 1, 7, 7);
+    const k = H.spawn('boar', 0, 0, 7); H.spawn('mech_knight', 0, 3, 3, { maker: k.id }); H.spawn('royal_mech', 0, 4, 5, { maker: 1 });
+    const b2 = H.legalActionsFor(3, 3, 'normal').acts.find(a => a.x === 4 && a.y === 5 && a.kind === 'special'); if (!b2) return false;
+    H.doAction(b2);
+    const uk = H.at(4, 5); const offs = H.legalActionsFor(4, 5, 'normal').acts.map(a => [Math.abs(a.x - 4), Math.abs(a.y - 5)]);
+    return longDiag && uk.type === 'up_mech_knight' && offs.length > 0 && offs.every(([dx, dy]) => dx * dy === 3);
+  }],
+  ['Нежить и механизмы: Лич поглощает механизм, в пул он не попадает', () => {
+    const G = empty('undead', 'dwarves'); G.spawn('phylactery', 0, 0, 0); G.spawn('dw_king', 1, 7, 7);
+    G.spawn('lich', 0, 3, 0); G.spawn('mech_rook', 1, 3, 5, { maker: 5 });
+    const a = G.legalActionsFor(3, 0, 'special').acts.find(a => a.kind === 'convert' && a.y === 5); if (!a || !/Поглотить/.test(a.label)) return false;
+    G.doAction(a);
+    return !G.pieces(1).some(o => o.p.type === 'mech_rook') && G.players[0].pool.length === 0 && !G.pieces(0).some(o => o.p.type === 'death_knight');
+  }],
+  /* ===== Эльфы ===== */
+  ['Эльфы: лучник стреляет «буквой Т», мешает только фигура прямо перед ним', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('archer', 0, 3, 1); G.spawn('pawn', 1, 4, 3); G.spawn('pawn', 1, 4, 2);   // e3 — не мешает
+    const s = G.legalActionsFor(3, 1, 'special').acts.some(a => a.kind === 'ranged' && a.x === 4 && a.y === 3);
+    const noCap = !G.legalActionsFor(3, 1, 'normal').acts.some(a => a.kind === 'capture');
+    G.spawn('pawn', 0, 3, 2);
+    const blocked = !G.legalActionsFor(3, 1, 'special').acts.length;
+    return s && noCap && blocked;
+  }],
+  ['Эльфы: Элитный лучник — Т во все стороны, ровно 2 по прямой и по диагонали', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('elite_archer', 0, 3, 3);
+    for (const [x, y] of [[2, 1], [3, 5], [5, 5], [5, 3], [6, 6]]) G.spawn('pawn', 1, x, y);
+    const sp = G.legalActionsFor(3, 3, 'special');
+    const hits = sp.acts.map(a => a.x + ',' + a.y).sort().join(' ');
+    const zone = new Set((sp.zones || []).map(z => z[0] + ',' + z[1]));
+    G.spawn('pawn', 0, 4, 4);                                  // соседняя по диагонали закрывает выстрел на 5,5
+    const h2 = G.legalActionsFor(3, 3, 'special').acts.map(a => a.x + ',' + a.y);
+    return hits === '2,1 3,5 5,3 5,5' && zone.has('1,1') && zone.has('4,5') && !h2.includes('5,5') && h2.includes('3,5');
+  }],
+  ['Дварфы: Дварф-ферзь создаёт механизмы на любой соседней клетке', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('dw_queen', 0, 3, 3); G.spawn('pawn', 1, 4, 4);
+    const cells = new Set(G.legalActionsFor(3, 3, 'special').acts.filter(a => a.kind === 'summon').map(a => a.x + ',' + a.y));
+    return cells.size === 7 && !cells.has('4,4') && cells.has('2,2') && cells.has('3,2');
+  }],
+  ['Стрелки: выстрелы и зона выстрела — только по 2-му нажатию', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('falconer', 0, 3, 3); G.spawn('pawn', 1, 4, 5);
+    const n = G.legalActionsFor(3, 3, 'normal');
+    const s = G.legalActionsFor(3, 3, 'special');
+    return !n.acts.some(a => a.kind === 'ranged') && !(n.zones || []).length && s.acts.some(a => a.kind === 'ranged') && (s.zones || []).length >= 8;
+  }],
+  ['Эльфы: Сокольничий не берёт ходом, стреляет сквозь фигуры, 3+1 только вперёд', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('falconer', 0, 3, 3); G.spawn('pawn', 1, 4, 5); G.spawn('pawn', 1, 4, 6); G.spawn('pawn', 0, 3, 4);
+    const n = G.legalActionsFor(3, 3, 'normal').acts;
+    const s = G.legalActionsFor(3, 3, 'special').acts.map(a => a.x + ',' + a.y);
+    return !n.some(a => a.kind === 'capture') && n.some(a => a.x === 2 && a.y === 6) && !n.some(a => a.y === 0 && Math.abs(a.x - 3) === 1)
+      && s.includes('4,5') && s.includes('4,6');
+  }],
+  ['Эльфы: Трент — рокировка с соседом и через свободные клетки', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('trent', 0, 0, 0); G.spawn('archmage', 0, 4, 0); G.spawn('falconer', 0, 0, 1);
+    G.doAction(G.legalActionsFor(0, 0, 'special').acts.find(a => a.x === 4 && a.y === 0));
+    const far = G.at(2, 0) && G.at(2, 0).type === 'archmage' && G.at(3, 0) && G.at(3, 0).type === 'trent';
+    G.doAction(G.legalActionsFor(3, 0, 'special').acts.find(a => a.x === 2 && a.y === 0));
+    const adj = G.at(3, 0).type === 'archmage' && G.at(2, 0).type === 'trent';
+    G.doAction(G.legalActionsFor(0, 1, 'normal').acts[0]);   // просто проверка, что всё живо
+    return far && adj;
+  }],
+  ['Эльфы: Ветрокрылый прыгает через своих, не через врагов; не стреляет вплотную', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('windwing', 0, 0, 0); G.spawn('archer', 0, 1, 1); G.spawn('pawn', 1, 3, 3);
+    const n = G.legalActionsFor(0, 0, 'normal').acts.map(a => a.x + ',' + a.y);
+    const s = G.legalActionsFor(0, 0, 'special').acts.length;
+    const H = empty('elves', 'humans'); H.spawn('elf_queen', 0, 7, 0); H.spawn('king', 1, 7, 7);
+    H.spawn('windwing', 0, 0, 0); H.spawn('pawn', 1, 1, 1); H.spawn('pawn', 1, 3, 3);
+    const s2 = H.legalActionsFor(0, 0, 'special').acts.length;
+    const W = empty('elves', 'humans'); W.spawn('elf_queen', 0, 7, 0); W.spawn('king', 1, 7, 7);
+    W.spawn('windwing', 0, 0, 0); W.spawn('pawn', 1, 3, 3);
+    const s3 = W.legalActionsFor(0, 0, 'special').acts.some(a => a.x === 3 && a.y === 3);
+    return n.includes('2,2') && !n.includes('3,3') && !n.includes('4,4') && s === 0 && s2 === 0 && s3;
+  }],
+  ['Эльфы: Архимаг не телепортируется на дальний ряд, пока вражеский ферзь его не покинет', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('archmage', 0, 3, 0); G.spawn('queen', 1, 3, 7);
+    const before = G.legalActionsFor(3, 0, 'normal').acts.some(a => a.y === 7);
+    const many = G.legalActionsFor(3, 0, 'normal').acts.length > 40;
+    G.turn = 1; G.doAction(G.legalActionsFor(3, 7, 'normal').acts.find(a => a.x === 3 && a.y === 5)); G.turn = 0;
+    const after = G.legalActionsFor(3, 0, 'normal').acts.some(a => a.y === 7);
+    return !before && after && many;
+  }],
+  ['Эльфы: Архимаг стреляет по прямым и диагоналям, препятствия закрывают выстрел', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('archmage', 0, 3, 3); G.spawn('knight', 1, 6, 6); G.spawn('rook', 1, 3, 6); G.spawn('pawn', 1, 0, 0); G.spawn('pawn', 0, 5, 1); G.spawn('pawn', 1, 6, 0);
+    const t = G.legalActionsFor(3, 3, 'special').acts.map(a => FC.sq(a.x, a.y)).sort().join(' ');
+    return t === 'a1 d7 g7';                                    // f2 — своя пешка закрывает g1 по диагонали
+  }],
+  ['Эльфы: Архимаг на перезарядке может выстрелить, только чтобы снять шах с Королевы', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 4, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('rook', 1, 4, 6); G.spawn('archmage', 0, 0, 6, { cooldown: 2 }); G.spawn('knight', 1, 2, 4);
+    const inCheck = G.legalActionsFor(0, 6, 'special').acts.map(a => FC.sq(a.x, a.y)).join(' ');   // только ладья, снимающая шах
+    const H = empty('elves', 'humans'); H.spawn('elf_queen', 0, 7, 0); H.spawn('king', 1, 7, 7);
+    H.spawn('archmage', 0, 0, 6, { cooldown: 2 }); H.spawn('rook', 1, 4, 6);
+    const noCheck = H.legalActionsFor(0, 6, 'special').acts.length;
+    return inCheck === 'e7' && noCheck === 0;
+  }],
+  ['Эльфы: королева бьёт соседнюю клетку и остаётся на месте; её мат — поражение', () => {
+    const G = empty('elves', 'humans'); G.spawn('elf_queen', 0, 4, 0); G.spawn('king', 1, 7, 7); G.spawn('knight', 1, 5, 1);
+    const a = G.legalActionsFor(4, 0, 'special').acts.find(a => a.kind === 'ranged'); if (!a) return false;
+    G.doAction(a);
+    return G.at(4, 0).type === 'elf_queen' && !G.at(5, 1) && G.at(4, 0).cooldown > 0 && G.leader(0).p.type === 'elf_queen';
+  }],
+  /* ===== Хтонь ===== */
+  ['Хтонь: слияние даёт ходы обеих фигур; король не сливается; разделение', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('mind_devourer', 0, 1, 0); G.spawn('flesh', 0, 2, 2); G.spawn('pawn', 1, 3, 4);
+    const noCapAlone = !G.legalActionsFor(1, 0, 'normal').acts.some(a => a.kind === 'capture');
+    const m = G.legalActionsFor(1, 0, 'normal').acts.find(a => a.merge && a.x === 2 && a.y === 2); if (!m) return false;
+    G.doAction(m);
+    const st = G.at(2, 2); if (!st || G.partsOf(st).length !== 2) return false;
+    const n = G.legalActionsFor(2, 2, 'normal').acts;
+    const union = n.some(a => a.x === 2 && a.y === 3) && n.some(a => a.kind === 'capture' && a.x === 3 && a.y === 4);
+    const kingNo = !G.legalActionsFor(7, 0, 'normal').acts.some(a => a.merge);
+    const sp = G.legalActionsFor(2, 2, 'special').acts.find(a => a.split && /Пожиратель/.test(a.label) && a.kind === 'move'); if (!sp) return false;
+    G.doAction(sp);
+    return noCapAlone && union && kingNo && G.at(2, 2) && !G.at(2, 2).parts && G.at(sp.x, sp.y).type === 'mind_devourer';
+  }],
+  ['Хтонь: Ползучая плоть ходит только на 1 клетку вперёд или вбок', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('flesh', 0, 3, 3);
+    const w = G.legalActionsFor(3, 3, 'normal').acts.map(a => (a.x - 3) + ',' + (a.y - 3)).sort().join(' ');
+    const B = empty('humans', 'chthon'); B.spawn('king', 0, 7, 0); B.spawn('tx', 1, 7, 7); B.spawn('flesh', 1, 3, 4); B.turn = 1;
+    const b = B.legalActionsFor(3, 4, 'normal').acts.map(a => (a.x - 3) + ',' + (a.y - 4)).sort().join(' ');
+    return w === '-1,0 0,1 1,0' && b === '-1,0 0,-1 1,0';
+  }],
+  ['Дварфы: пешка на последнем ряду превращается в Инженера (одна фигура, свой значок)', () => {
+    const G = empty('dwarves', 'humans'); G.spawn('dw_king', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    const p = G.spawn('dw_pawn', 0, 0, 6, { moved: true });
+    G.doAction(G.legalActionsFor(0, 6, 'normal').acts.find(a => a.y === 7));
+    const all = G.allPieces().filter(o => o.p.owner === 0 && o.x === 0);
+    return !G.at(0, 6) && G.at(0, 7).type === 'engineer' && G.at(0, 7).id === p.id && all.length === 1 && FC.PIECES.engineer.glyph !== FC.GLYPH.pawn;
+  }],
+  ['Хтонь: Аномалия — 1,3,5,7 по прямой и 2,4,6 по диагонали, через фигуры не прыгает', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('anomaly', 0, 0, 0); G.spawn('pawn', 1, 0, 2); G.spawn('pawn', 1, 0, 3);
+    const t = G.legalActionsFor(0, 0, 'normal').acts.map(a => a.x + ',' + a.y);
+    const open = t.includes('0,1') && !t.includes('0,2') && !t.includes('0,3') && t.includes('2,2') && !t.includes('1,1') && t.includes('4,4') && t.includes('6,6');
+    G.spawn('pawn', 1, 3, 3);                                   // фигура на промежуточной клетке диагонали (3 — недопустимо)
+    const t2 = G.legalActionsFor(0, 0, 'normal').acts.map(a => a.x + ',' + a.y);
+    return open && t2.includes('2,2') && !t2.includes('4,4') && !t2.includes('3,3');
+  }],
+  ['Хтонь: заражённой фигурой ходит только Хтонь; после хода она гибнет, появляется плоть', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('flesh', 0, 3, 3); G.spawn('knight', 1, 4, 4);
+    G.doAction(G.legalActionsFor(3, 3, 'special').acts.find(a => a.kind === 'convert' && a.x === 4 && a.y === 4)); G.endTurn();
+    const ownerCant = !G.canAct(G.at(4, 4), 1) && !G.allActions(1).some(a => a.from[0] === 4 && a.from[1] === 4);
+    const second = !!G.at(3, 3);                               // плоть ушла внутрь фигуры — на доске её нет
+    G.doAction(G.allActions(1)[0]); G.endTurn();
+    const mv = G.allActions(0).find(a => a.from[0] === 4 && a.from[1] === 4 && a.kind === 'move'); if (!mv) return false;
+    G.doAction(mv);
+    const f = G.at(mv.x, mv.y);
+    return ownerCant && !second && f && f.type === 'flesh' && f.owner === 0 && !G.pieces(1).some(o => o.p.type === 'knight');
+  }],
+  ['Хтонь: плоть заражает только на 1 клетку по диагонали', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('flesh', 0, 3, 3); for (const [x, y] of [[3, 4], [2, 3], [3, 5], [4, 4], [2, 2]]) G.spawn('knight', 1, x, y);
+    const t = G.legalActionsFor(3, 3, 'special').acts.filter(a => a.kind === 'convert').map(a => a.x + ',' + a.y).sort().join(' ');
+    return t === '2,2 4,4';
+  }],
+  ['Хтонь: заражённая фигура не берёт, а заражает следующую и погибает', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('flesh', 0, 3, 3); G.spawn('rook', 1, 4, 4); G.spawn('knight', 1, 4, 6);
+    G.doAction(G.legalActionsFor(3, 3, 'special').acts.find(a => a.kind === 'convert' && a.x === 4 && a.y === 4));
+    const acts = G.legalActionsFor(4, 4, 'normal', { side: 0 }).acts;
+    if (acts.some(a => a.kind === 'capture')) return false;
+    const inf = acts.find(a => a.kind === 'convert' && a.x === 4 && a.y === 6); if (!inf) return false;
+    G.doAction(inf);
+    const k = G.at(4, 6);
+    return !G.at(4, 4) && k && k.type === 'knight' && k.infBy && k.infBy.side === 0;
+  }],
+  ['Хтонь: усиленная плоть (дошла до края) остаётся на доске и заражает несколько', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 3);
+    G.spawn('flesh', 0, 3, 6); G.spawn('knight', 1, 2, 6); G.spawn('rook', 1, 4, 6);
+    G.doAction(G.legalActionsFor(3, 6, 'normal').acts.find(a => a.x === 3 && a.y === 7));
+    if (!G.at(3, 7).evolved) return false;
+    G.doAction(G.legalActionsFor(3, 7, 'special').acts.find(a => a.x === 2 && a.y === 6));
+    const stays = G.at(3, 7) && G.at(3, 7).type === 'flesh';
+    const a2 = G.legalActionsFor(3, 7, 'special').acts.find(a => a.x === 4 && a.y === 6); if (!a2) return false;
+    G.doAction(a2);
+    return stays && G.at(2, 6).infBy && G.at(4, 6).infBy;
+  }],
+  ['Хтонь: соперник может взять свою заражённую фигуру, а Хтонь — нет', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('flesh', 0, 3, 3); G.spawn('knight', 1, 4, 4); G.spawn('rook', 1, 0, 4); G.spawn('xal', 0, 4, 1);
+    G.doAction(G.legalActionsFor(3, 3, 'special').acts.find(a => a.kind === 'convert' && a.x === 4 && a.y === 4));
+    const chthonCant = !G.allActions(0).some(a => a.kind === 'capture' && a.x === 4 && a.y === 4);
+    G.endTurn();
+    const cap = G.legalActionsFor(0, 4, 'normal').acts.find(a => a.kind === 'capture' && a.x === 4 && a.y === 4); if (!cap) return false;
+    G.doAction(cap);
+    return chthonCant && G.at(4, 4).type === 'rook' && G.at(4, 4).owner === 1;
+  }],
+  ['Хтонь: плоть не заражает короля, но ставит ему шах', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 4, 4);
+    G.spawn('flesh', 0, 3, 3);
+    const noInfect = !G.legalActionsFor(3, 3, 'special').acts.some(a => a.x === 4 && a.y === 4);
+    return noInfect && G.leaderThreatened(1);
+  }],
+  ['Хтонь: пешки соперника под контролем ходят в обратную сторону', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('mind_devourer', 0, 3, 2); G.spawn('pawn', 1, 3, 4, { moved: true });   // чёрная пешка обычно идёт вниз (к y=3)
+    G.doAction(G.legalActionsFor(3, 2, 'special').acts.find(a => a.x === 3 && a.y === 4));
+    const ctl = G.legalActionsFor(3, 4, 'normal', { side: 0 }).acts.map(a => a.x + ',' + a.y);
+    const own = G.legalActionsFor(3, 4, 'normal', { side: 1 }).acts.map(a => a.x + ',' + a.y);
+    return ctl.includes('3,5') && !ctl.includes('3,3') && own.includes('3,3');
+  }],
+  ['Хтонь: Пожиратель разума проклинает конём и ровно на 2 клетки по прямой и диагонали', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('mind_devourer', 0, 3, 3);
+    for (const [x, y] of [[5, 5], [1, 1], [4, 4], [3, 5], [4, 5], [6, 6]]) G.spawn('pawn', 1, x, y);
+    const t = G.legalActionsFor(3, 3, 'special').acts.map(a => a.x + ',' + a.y).sort().join(' ');
+    return t === '1,1 3,5 4,5 5,5';                            // 4,4 — 1 клетка, 6,6 — 3 клетки: нельзя
+  }],
+  ['Хтонь: у одного Пожирателя разума под контролем только одна фигура', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('mind_devourer', 0, 3, 3); G.spawn('rook', 1, 3, 5); G.spawn('knight', 1, 5, 4);
+    G.doAction(G.legalActionsFor(3, 3, 'special').acts.find(a => a.x === 3 && a.y === 5));
+    const first = G.at(3, 5).mind === 0;
+    G.doAction(G.legalActionsFor(3, 3, 'special').acts.find(a => a.x === 5 && a.y === 4));
+    return first && G.at(3, 5).mind == null && G.at(5, 4).mind === 0;
+  }],  ['Хтонь: Контроль разума можно наложить на вражеского короля', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 3, 5);
+    G.spawn('mind_devourer', 0, 3, 3);
+    const a = G.legalActionsFor(3, 3, 'special').acts.find(a => a.x === 3 && a.y === 5); if (!a) return false;
+    G.doAction(a);
+    return G.at(3, 5).mind === 0 && G.winner == null;
+  }],
+  ['Хтонь: ТХ\'Зсал перед Ксал\'Таргоном перемещается за него', () => {
+    const G = empty('chthon', 'humans'); G.spawn('king', 1, 7, 7);
+    G.spawn('xal', 0, 3, 3); G.spawn('tx', 0, 3, 4); G.spawn('pawn', 1, 3, 6);
+    const a = G.legalActionsFor(3, 3, 'special').acts.find(a => a.x === 3 && a.y === 4); if (!a) return false;
+    G.doAction(a);
+    return G.at(3, 2) && G.at(3, 2).type === 'tx' && G.at(3, 3).type === 'xal' && !G.at(3, 3).parts && G.at(3, 5) && G.at(3, 5).type === 'pawn';
+  }],
+  ['Хтонь: контроль разума — владелец ходит сам, Хтонь может один раз сходить проклятой фигурой', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('mind_devourer', 0, 3, 3); G.spawn('rook', 1, 5, 4); G.spawn('pawn', 1, 5, 6);
+    G.doAction(G.legalActionsFor(3, 3, 'special').acts.find(a => a.x === 5 && a.y === 4)); G.endTurn();
+    const ownerCan = G.allActions(1).some(a => a.from[0] === 5 && a.from[1] === 4);
+    G.doAction(G.legalActionsFor(7, 7, 'normal').acts[0]); G.endTurn();
+    const cap = G.allActions(0).find(a => a.from[0] === 5 && a.from[1] === 4 && a.kind === 'capture' && a.x === 5 && a.y === 6); if (!cap) return false;
+    G.doAction(cap);
+    const r = G.at(5, 6);
+    return ownerCan && r && r.type === 'rook' && r.owner === 1 && r.mind == null;
+  }],
+  ['Хтонь: Пожелание реальности сдвигает линию, пожирает врага, сливается с союзником', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 7, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('xal', 0, 0, 0); G.spawn('pawn', 1, 0, 1); G.spawn('knight', 1, 0, 4); G.spawn('flesh', 0, 1, 1); G.spawn('pawn', 1, 3, 3);
+    G.doAction(G.legalActionsFor(0, 0, 'special').acts.find(a => a.x === 0 && a.y === 1));
+    const ok1 = !G.pieces(1).some(o => o.p.type === 'pawn' && o.x === 0) && G.at(0, 3) && G.at(0, 3).type === 'knight';
+    G.doAction(G.legalActionsFor(0, 0, 'special').acts.find(a => a.x === 1 && a.y === 1));
+    const x = G.at(0, 0);
+    return ok1 && x.type === 'xal' && G.partsOf(x).includes('flesh') && G.at(2, 2) && G.at(2, 2).type === 'pawn';
+  }],
+  ['Хтонь: Искажение пространства — перенос через край, прыжок через ТХ\'Зсала, перезарядка 3 хода', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 3, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('flesh', 0, 2, 0); G.spawn('pawn', 1, 7, 0);
+    const acts = G.legalActionsFor(3, 0, 'special').acts;
+    const stay = acts.find(a => /ряд 1 вправо/.test(a.label) && /остаётся/.test(a.label)); if (!stay) return false;
+    G.doAction(stay);
+    const ok = G.at(3, 0).type === 'tx' && G.at(4, 0) && G.at(4, 0).type === 'flesh' && G.at(0, 0) && G.at(0, 0).type === 'pawn';
+    const cd = [];
+    for (let i = 0; i < 4; i++) { G.endTurn(); G.turn = 0; cd.push(G.legalActionsFor(3, 0, 'special').acts.length > 0); }
+    return ok && cd.join() === 'false,false,false,true';
+  }],
+  ['Хтонь: Искажением пространства нельзя поставить мат', () => {
+    const G = empty('chthon', 'humans'); G.spawn('tx', 0, 0, 7); G.spawn('king', 1, 7, 7);
+    G.spawn('anomaly', 0, 6, 0); G.spawn('anomaly', 0, 5, 1); G.players[1].pawnSummons = 16;
+    // сдвиг, ставящий мат, в списке быть не должен
+    return G.legalActionsFor(0, 7, 'special').acts.every(a => !G.givesMate(a, 0));
+  }],
+  ['Демоны: Обелиск берёт в ближнем бою', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('obelisk', 0, 3, 3); G.spawn('knight', 1, 4, 4);
+    const a = G.legalActionsFor(3, 3, 'normal').acts.find(a => a.kind === 'capture' && a.x === 4 && a.y === 4);
+    if (!a) return false;
+    G.doAction(a);
+    return G.at(4, 4) && G.at(4, 4).type === 'obelisk';
+  }],
+  ['Демоны: Имп у Обелиска, когда союзник (не Имп) берёт врага', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('obelisk', 0, 6, 1); G.spawn('obelisk', 0, 1, 6); G.spawn('guard', 0, 3, 1);
+    G.spawn('king', 1, 7, 7); G.spawn('pawn', 1, 6, 4);
+    G.doAction(G.legalActionsFor(3, 1, 'normal').acts.find(a => a.x === 3 && a.y === 4) || at(G, 3, 1)[0]);   // Страж: 3,1 → 3,4 (без взятия)
+    if (G.nextPending()) return false;                                                                       // простой ход — Импа нет
+    G.endTurn(); G.turn = 0;
+    G.doAction(G.legalActionsFor(3, 4, 'normal').acts.find(a => a.kind === 'capture' && a.x === 6 && a.y === 4));
+    const p = G.nextPending(); if (!p || p.owner !== 0 || p.kind !== 'cells') return false;
+    const ok = p.cells.every(c => Math.max(Math.abs(c.x - 6), Math.abs(c.y - 1)) === 1);                     // у Обелиска, ближайшего к месту взятия
+    G.resolvePending(p.cells[0]);
+    return ok && G.pieces(0).filter(o => o.p.type === 'imp').length === 1;
+  }],
+  ['Демоны: нет Импа за взятие Импом и за потерю своей фигуры', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('obelisk', 0, 6, 1);
+    G.spawn('imp', 0, 3, 3); G.spawn('pawn', 1, 4, 4); G.spawn('king', 1, 7, 7); G.spawn('rook', 1, 0, 6); G.spawn('guard', 0, 0, 3);
+    G.doAction(G.legalActionsFor(3, 3, 'normal').acts.find(a => a.kind === 'capture' && a.x === 4 && a.y === 4));
+    const impKill = !!G.nextPending();
+    G.endTurn();
+    G.doAction(G.legalActionsFor(0, 6, 'normal').acts.find(a => a.kind === 'capture' && a.x === 0 && a.y === 3));   // враг берёт Стража
+    return !impKill && !G.nextPending() && G.pieces(0).filter(o => o.p.type === 'imp').length === 1;
+  }],
+  ['Демоны: нет шаха и мата — Призыватель может ходить под удар', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('king', 1, 7, 7); G.spawn('rook', 1, 1, 7); G.spawn('rook', 1, 7, 0);
+    // Призыватель «под шахом» ладьи 7,0 и все соседние поля бьются — у обычного лидера это мат
+    const free = G.legalActionsFor(0, 0, 'normal').acts.some(a => a.x === 1 && a.y === 0);
+    G.turn = 1; G.endTurn();
+    return !G.leaderThreatened(0) && free && G.winner == null;
+  }],
+  ['Демоны: Призыватель взят, Король жив — игра идёт; Король взят — поражение', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('demon_king', 0, 4, 3); G.spawn('guard', 0, 4, 0);
+    G.spawn('king', 1, 7, 7); G.spawn('rook', 1, 0, 7); G.spawn('rook', 1, 4, 7); G.turn = 1;
+    G.doAction(G.legalActionsFor(0, 7, 'normal').acts.find(a => a.kind === 'capture' && a.x === 0 && a.y === 0));
+    if (G.winner != null || G.players[0].reviveDue) return false;
+    G.endTurn();
+    if (G.leader(0).p.type !== 'demon_king') return false;
+    // свой Страж не может взять последнего лидера
+    if (G.legalActionsFor(4, 0, 'normal').acts.some(a => a.x === 4 && a.y === 3)) return false;
+    G.turn = 1;
+    G.doAction(G.legalActionsFor(4, 7, 'normal').acts.find(a => a.kind === 'capture' && a.x === 4 && a.y === 3));
+    return G.winner === 1;
+  }],
+  ['Демоны: Король пал, затем взят Призыватель — поражение', () => {
+    const G = empty('demons', 'humans'); G.spawn('summoner', 0, 0, 0); G.spawn('demon_king', 0, 4, 4); G.spawn('imp', 0, 1, 0);
+    G.spawn('king', 1, 7, 7); G.spawn('rook', 1, 4, 7); G.spawn('rook', 1, 0, 7); G.turn = 1;
+    G.doAction(G.legalActionsFor(4, 7, 'normal').acts.find(a => a.kind === 'capture' && a.x === 4 && a.y === 4));
+    if (G.winner != null || !G.players[0].reviveDue) return false;
+    G.doAction(G.legalActionsFor(0, 7, 'normal').acts.find(a => a.kind === 'capture' && a.x === 0 && a.y === 0));
+    return G.winner === 1;
+  }],
+  ['Нежить: Кладбище берёт врага на соседней клетке', () => {
+    const G = empty('undead', 'humans'); G.spawn('phylactery', 0, 0, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('graveyard', 0, 3, 3); G.spawn('knight', 1, 4, 4); G.spawn('skeleton', 0, 2, 2);
+    const acts = G.legalActionsFor(3, 3, 'normal').acts;
+    const cap = acts.find(a => a.kind === 'capture' && a.x === 4 && a.y === 4);
+    if (!cap || acts.some(a => a.x === 2 && a.y === 2)) return false;   // своего не берёт
+    G.doAction(cap);
+    return G.at(4, 4) && G.at(4, 4).type === 'graveyard';
+  }],
+  ['Нежить: Кладбище воскрешает фигуру из пула', () => {
+    const G = empty('undead', 'humans'); G.spawn('phylactery', 0, 0, 0); G.spawn('king', 1, 7, 7);
+    G.spawn('death_knight', 0, 3, 3); G.spawn('knight', 1, 3, 6); G.spawn('graveyard', 0, 5, 1);
+    G.doAction(G.legalActionsFor(3, 3, 'normal').acts.find(a => a.kind === 'capture' && a.x === 3 && a.y === 6));
+    if (G.players[0].pool.join() !== 'soul_eater') return false;                                              // конь → Пожиратель душ в пуле
+    G.endTurn(); G.turn = 0;
+    const rv = G.legalActionsFor(5, 1, 'special').acts.filter(a => a.kind === 'revive');
+    if (rv.length !== 3) return false;                                                                        // 3 клетки перед Кладбищем
+    G.doAction(rv.find(a => a.x === 5 && a.y === 2));
+    const p = G.at(5, 2);
+    return p && p.type === 'soul_eater' && p.owner === 0 && G.players[0].pool.length === 0
+      && G.legalActionsFor(5, 1, 'special').acts.every(a => a.kind !== 'revive');
+  }],
+  ['Нежить: при 12 Скелетах — предупреждение', () => {
+    const G = empty('undead', 'humans'); G.spawn('phylactery', 0, 0, 0); G.spawn('king', 1, 7, 7); G.spawn('graveyard', 0, 4, 2);
+    for (let i = 0; i < 12; i++) G.spawn('skeleton', 0, i % 4, 4 + Math.floor(i / 4));
+    const c = G.legalActionsFor(4, 2, 'special');
+    return (c.warns || []).some(w => /больше 12 Скелетов/.test(w));
+  }],
+  ['Шаман: дальняя атака на 2', () => {
+    const G = empty('orcs', 'humans'); G.spawn('shaman', 0, 4, 0); G.spawn('king', 1, 7, 7); G.spawn('pawn', 1, 4, 2);
+    return G.legalActionsFor(4, 0, 'special').acts.some(a => a.kind === 'ranged' && a.y === 2);
+  }],
+  ['Лич не берёт обычные фигуры', () => {
+    const G = empty('undead', 'orcs'); G.spawn('phylactery', 0, 0, 0); G.spawn('shaman', 1, 7, 7); G.spawn('lich', 0, 3, 0); G.spawn('goblin', 1, 3, 5);
+    return !G.legalActionsFor(3, 0, 'normal').acts.some(a => a.kind === 'capture' || (a.x === 3 && a.y === 5));
+  }],
+  ['Лич берёт ферзя и ставит шах', () => {
+    const G = empty('undead', 'orcs'); G.spawn('phylactery', 0, 0, 0); G.spawn('shaman', 1, 7, 7); G.spawn('lich', 0, 3, 0); G.spawn('chief', 1, 3, 5);
+    const takesQueen = G.legalActionsFor(3, 0, 'normal').acts.some(a => a.kind === 'capture' && a.x === 3 && a.y === 5);
+    const G2 = empty('undead', 'orcs'); G2.spawn('phylactery', 0, 0, 0); G2.spawn('shaman', 1, 7, 7); G2.spawn('lich', 0, 7, 2);
+    return takesQueen && G2.leaderThreatened(1);
+  }],
+  ['Лич превращает фигуру', () => {
+    const G = empty('undead', 'orcs'); G.spawn('phylactery', 0, 0, 0); G.spawn('shaman', 1, 7, 7); G.spawn('lich', 0, 3, 0); G.spawn('goblin', 1, 3, 5);
+    G.doAction(G.legalActionsFor(3, 0, 'special').acts[0]); return G.at(3, 5).owner === 0 && G.at(3, 5).type === 'skeleton' && G.at(3, 4).type === 'lich';
+  }],
+];
+setTimeout(() => {
+  const checks = CHECKS.map(([n, f]) => { let ok; try { ok = f(); } catch (e) { ok = false; n += ' — ' + e.message; } return [n, ok]; });
+  const failed = checks.filter(c => !c[1]).length;
+  document.body.insertAdjacentHTML('beforeend', `<h3>Проверки правил: ${checks.length - failed}/${checks.length}</h3>` + checks.map(([n, ok]) => `<div class="${ok ? '' : 'err'}">${ok ? '✔' : '✘'} ${n}</div>`).join(''));
+  window.CHECKS_RESULT = { failed, list: checks };
+  const t0 = performance.now();
+  for (const a of ids) for (const b of ids) {
+    const row = { a, b, w0: 0, w1: 0, draw: 0, plies: 0 };
+    for (let g = 0; g < GAMES; g++) {
+      try {
+        const G = play(a, b, g % 2 === 1);
+        if (G.winner === 0) row.w0++; else if (G.winner === 1) row.w1++; else row.draw++;
+        row.plies += G.turnNo;
+      } catch (e) { res.errors.push(`${a} vs ${b}: ${e.message}\n${e.stack}`); }
+    }
+    res.rows.push(row);
+  }
+  const ms = Math.round(performance.now() - t0);
+  window.TEST_RESULT = { errors: res.errors.length, ms };
+  document.getElementById('out').innerHTML =
+    `<p>Партий: ${ids.length * ids.length * GAMES}, время ${ms} мс, ошибок: <b class="${res.errors.length ? 'err' : ''}">${res.errors.length}</b></p>` +
+    res.errors.map(e => `<pre class="err">${e}</pre>`).join('') +
+    '<table><tr><th>Белые</th><th>Чёрные</th><th>Победы б.</th><th>Победы ч.</th><th>Без итога</th><th>Ср. ходов</th></tr>' +
+    res.rows.map(r => `<tr><td>${FC.FACTIONS[r.a].name}</td><td>${FC.FACTIONS[r.b].name}</td><td>${r.w0}</td><td>${r.w1}</td><td>${r.draw}</td><td>${Math.round(r.plies / GAMES)}</td></tr>`).join('') + '</table>';
+}, 50);
+</script>
+</body></html>

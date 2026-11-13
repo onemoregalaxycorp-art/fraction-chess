@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8"><title>Fraction Chess — анализ причин дисбаланса</title>
+<style>
+body{font-family:Consolas,monospace;background:#111;color:#ddd;padding:20px;font-size:14px}
+table{border-collapse:collapse;margin:10px 0 24px}td,th{border:1px solid #444;padding:4px 9px;text-align:center}
+th{background:#1f2433}.up{color:#4ade80}.down{color:#f87171}
+input{width:60px;background:#222;color:#fff;border:1px solid #555}button{padding:6px 14px}
+</style></head>
+<body>
+<h2>Анализ причин дисбаланса</h2>
+<p>Партий на пару (поровну за белых и чёрных): <input id="n" value="50"> · Лимит полуходов: <input id="lim" value="200">
+<button id="go">Запустить</button></p>
+<p>Каждый эксперимент: фракция играет против трёх остальных. «Базовая линия» — текущие правила. В экспериментах отключается одна механика — разница показывает её вклад в силу фракции.</p>
+<div id="prog"></div><div id="out"></div>
+<script src="js/engine.js"></script>
+<script src="js/factions/humans.js"></script>
+<script src="js/factions/orcs.js"></script>
+<script src="js/factions/demons.js"></script>
+<script src="js/factions/undead.js"></script>
+  <script src="js/factions/dwarves.js"></script>
+  <script src="js/factions/elves.js"></script>
+  <script src="js/factions/chthon.js"></script>
+<script src="js/ai.js"></script>
+<script>
+FC.AI.depth = 1;   // массовые партии — быстрая оценка на 1 ход (поиск на 3 хода проверяется отдельным тестом)
+
+const ids = Object.keys(FC.FACTIONS);
+const P = FC.PIECES, GP = FC.Game.prototype;
+const material = (G, o) => G.pieces(o).reduce((s, e) => s + (G.def(e.p).royal ? 0 : FC.VALUE[G.def(e.p).cls]), 0);
+const count = (G, o, type) => G.pieces(o).filter(e => e.p.type === type).length;
+
+/* ---- патчи: каждая функция применяет изменение и возвращает функцию отката ---- */
+function wrap(type, mode, filter) {           // отфильтровать действия фигуры
+  const orig = P[type][mode];
+  P[type][mode] = function (c) { if (orig) orig.call(this, c); c.acts = c.acts.filter(a => filter(a, c)); };
+  return () => { P[type][mode] = orig; };
+}
+function replace(type, mode, fn) { const orig = P[type][mode]; P[type][mode] = fn; return () => { P[type][mode] = orig; }; }
+const noDouble = a => !(a.hits && a.hits.length === 2);
+
+const EXPERIMENTS = [
+  { f: 'orcs', name: 'Базовая линия' },
+  { f: 'orcs', name: 'Без двойного взятия вплотную (у всех орков)', patch: () => { const r = ['orc_warrior', 'chief', 'hop_goblin', 'shaman'].map(t => wrap(t, 'normal', noDouble)); return () => r.forEach(f => f()); } },
+  { f: 'orcs', name: 'Двойное взятие только у Орка-воина и Вождя', patch: () => { const r = ['hop_goblin', 'shaman'].map(t => wrap(t, 'normal', noDouble)); return () => r.forEach(f => f()); } },
+  { f: 'orcs', name: 'Вождь = обычный ферзь (без рывка, двойного взятия и ярости)', patch: () => { const a = replace('chief', 'normal', c => c.slide(FC.ALL8)), b = replace('chief', 'special', null); return () => { a(); b(); }; } },
+  { f: 'orcs', name: 'Орк-воин = ладья на 4 (без прорыва)', patch: () => { const a = replace('orc_warrior', 'normal', c => c.slide(FC.ORTH, 4)), b = replace('orc_warrior', 'special', null); return () => { a(); b(); }; } },
+  { f: 'orcs', name: 'Всадник = обычный конь', patch: () => replace('rider', 'normal', c => c.leap(FC.KNIGHT)) },
+  { f: 'orcs', name: 'Гоблин = обычная пешка (взятие по диагонали)', patch: () => replace('goblin', 'normal', P.pawn.normal) },
+  { f: 'orcs', name: 'Шаман без дальней атаки', patch: () => replace('shaman', 'special', null) },
+
+  { f: 'demons', name: 'Базовая линия' },
+  { f: 'demons', name: 'Гибель Короля без жертвы ≠ поражение', patch: () => { const o = GP.reviveOptions; GP.reviveOptions = function (w) { const r = o.call(this, w); return r.raw ? r : { raw: 1, legal: 0 }; }; return () => { GP.reviveOptions = o; }; } },
+  { f: 'demons', name: 'Без взятия союзников', patch: () => { const o = GP.canCapture; GP.canCapture = function (p, q) { return !!q && q !== p && q.owner !== p.owner; }; return () => { GP.canCapture = o; }; } },
+  { f: 'demons', name: 'Без похищенных ходов', patch: () => { const o = GP.stealMove; GP.stealMove = function () { }; return () => { GP.stealMove = o; }; } },
+
+  { f: 'humans', name: 'Базовая линия' },
+  { f: 'humans', name: 'Без призыва Пешек Королём', patch: () => replace('king', 'special', null) },
+  { f: 'humans', name: 'Призыв Пешек, но не больше 8 на доске', patch: () => wrap('king', 'special', (a, c) => count(c.G, c.p.owner, 'pawn') < 8) },
+  { f: 'humans', name: 'Жрец без дальней атаки', patch: () => replace('priest', 'special', null) },
+
+  { f: 'undead', name: 'Базовая линия' },
+  { f: 'undead', name: 'Кладбище без призыва Скелетов', patch: () => wrap('graveyard', 'special', a => a.kind !== 'summon') },
+  { f: 'undead', name: 'Призыв Скелетов, но не больше 8 на доске', patch: () => wrap('graveyard', 'special', (a, c) => a.kind !== 'summon' || count(c.G, c.p.owner, 'skeleton') < 8) },
+  { f: 'undead', name: 'Лич без превращения', patch: () => replace('lich', 'special', null) },
+  { f: 'undead', name: 'Без пула воскрешения', patch: () => wrap('graveyard', 'special', a => a.kind !== 'revive') },
+];
+
+/* ---- партия со статистикой по типам фигур ---- */
+const PS = {};   // статистика по типу фигуры (только базовые линии)
+const ps = t => PS[t] = PS[t] || { uses: 0, caps: 0, capV: 0, lost: 0, lostV: 0, mates: 0, ranged: 0, summon: 0, convert: 0, games: 0 };
+function playOne(f0, f1, lim, collect) {
+  const G = new FC.Game(f0, f1);
+  G.turn = Math.random() < .5 ? 0 : 1;
+  const last = [null, null];
+  let ply = 0;
+  for (; ply < lim && G.winner == null; ply++) {
+    const o = G.turn, a = FC.AI.choose(G, o);
+    if (!a) break;
+    const mover = G.at(a.from[0], a.from[1]), mt = mover.type;
+    last[o] = mt;
+    if (collect) {
+      const s = ps(mt); s.uses++;
+      if (a.kind === 'ranged') s.ranged++;
+      if (a.kind === 'summon' || a.kind === 'revive') s.summon++;
+      if (a.kind === 'convert') s.convert++;
+      if (a.kind === 'capture' || a.kind === 'ranged')
+        for (const [hx, hy] of (a.hits || [[a.x, a.y]])) {
+          const q = G.at(hx, hy); if (!q || q.owner === o) continue;
+          const v = FC.VALUE[G.def(q).cls]; s.caps++; s.capV += v; const l = ps(q.type); l.lost++; l.lostV += v;
+        }
+    }
+    G.doAction(a);
+    let p, g = 0;
+    while (G.winner == null && (p = G.nextPending()) && g++ < 20) G.resolvePending(FC.AI.resolve(G, p));
+    G.queue = []; G.history = []; G.future = [];
+    if (G.winner == null) G.endTurn();
+  }
+  let winner = G.winner, how = 'mate';
+  if (winner == null || winner === -1) {
+    const m0 = material(G, 0), m1 = material(G, 1);
+    winner = m0 - m1 >= 4 ? 0 : m1 - m0 >= 4 ? 1 : -1;
+    how = winner === -1 ? 'draw' : 'material';
+  } else if (/Король демонов/.test(G.winReason)) how = 'demonking';
+  if (collect && how === 'mate' && last[winner]) ps(last[winner]).mates++;
+  return { winner, how, plies: ply };
+}
+
+const RES = [];
+document.getElementById('go').onclick = () => {
+  const N = +document.getElementById('n').value, lim = +document.getElementById('lim').value;
+  let ei = 0, k = 0, jobs = null, cur = null, undo = null; const t0 = performance.now();
+  window.AN_DONE = false;
+  function startExp() {
+    const e = EXPERIMENTS[ei];
+    undo = e.patch ? e.patch() : null;
+    cur = { f: e.f, name: e.name, base: !e.patch, w: 0, d: 0, l: 0, mateW: 0, matW: 0, mateL: 0, dk: 0, plies: 0, n: 0, vs: {} };
+    jobs = [];
+    for (const o of ids) if (o !== e.f) for (let g = 0; g < N; g++) jobs.push(g % 2 ? [o, e.f, 1] : [e.f, o, 0]);
+    k = 0;
+  }
+  function endExp() { if (undo) undo(); RES.push(cur); ei++; }
+  startExp();
+  (function step() {
+    const tEnd = performance.now() + 2000;
+    while (ei < EXPERIMENTS.length && performance.now() < tEnd) {
+      const [a, b, side] = jobs[k++];
+      const r = playOne(a, b, lim, cur.base);
+      const opp = side ? a : b, v = cur.vs[opp] = cur.vs[opp] || { w: 0, d: 0, l: 0 };
+      cur.n++; cur.plies += r.plies;
+      if (r.winner === side) { cur.w++; v.w++; if (r.how === 'mate') cur.mateW++; else cur.matW++; }
+      else if (r.winner === 1 - side) { cur.l++; v.l++; if (r.how !== 'material') cur.mateL++; if (r.how === 'demonking') cur.dk++; }
+      else { cur.d++; v.d++; }
+      if (k >= jobs.length) { endExp(); if (ei < EXPERIMENTS.length) startExp(); }
+    }
+    document.getElementById('prog').textContent = `Эксперимент ${Math.min(ei + 1, EXPERIMENTS.length)} / ${EXPERIMENTS.length} · ${Math.round((performance.now() - t0) / 1000)} с`;
+    if (ei < EXPERIMENTS.length) setTimeout(step, 0); else { report(); window.AN_DONE = true; }
+  })();
+};
+
+const sc = r => (r.w + r.d / 2) / (r.w + r.d + r.l);
+const pct = x => Math.round(x * 100) + '%';
+function report() {
+  let h = '<h3>Эксперименты: очки фракции против трёх остальных</h3><table><tr><th>Фракция</th><th>Эксперимент</th><th>Очки</th><th>Δ к базе</th><th>П-Н-П</th><th>Победы матом</th><th>Поражения матом/Королём</th><th>Ср. длина</th>' + ids.map(i => `<th>vs ${FC.FACTIONS[i].name}</th>`).join('') + '</tr>';
+  let base = null;
+  for (const r of RES) {
+    if (r.base) base = r;
+    const d = sc(r) - sc(base);
+    h += `<tr><td>${FC.FACTIONS[r.f].name}</td><td style="text-align:left">${r.name}</td><td><b>${pct(sc(r))}</b></td><td class="${d > 0.02 ? 'up' : d < -0.02 ? 'down' : ''}">${r.base ? '—' : (d > 0 ? '+' : '') + Math.round(d * 100)}</td><td>${r.w}-${r.d}-${r.l}</td><td>${r.mateW}</td><td>${r.mateL}${r.dk ? ' (Король: ' + r.dk + ')' : ''}</td><td>${Math.round(r.plies / r.n)}</td>` +
+      ids.map(i => r.vs[i] ? `<td>${pct(sc(r.vs[i]))}</td>` : '<td>—</td>').join('') + '</tr>';
+  }
+  h += '</table><h3>Фигуры (по базовым линиям)</h3><table><tr><th>Фигура</th><th>Фракция</th><th>Действий</th><th>Взятий</th><th>Ценность взятого</th><th>Дальних</th><th>Призывов</th><th>Превращений</th><th>Матов</th><th>Потерь</th></tr>';
+  const rows = Object.entries(PS).filter(([t]) => P[t]).sort((a, b) => P[a[0]].faction.localeCompare(P[b[0]].faction) || b[1].capV - a[1].capV);
+  for (const [t, s] of rows) h += `<tr><td style="text-align:left">${P[t].name}</td><td>${FC.FACTIONS[P[t].faction].name}</td><td>${s.uses}</td><td>${s.caps}</td><td>${s.capV}</td><td>${s.ranged}</td><td>${s.summon}</td><td>${s.convert}</td><td>${s.mates}</td><td>${s.lost}</td></tr>`;
+  h += '</table>';
+  document.getElementById('out').innerHTML = h;
+  window.AN_RESULT = { RES: RES.map(r => ({ f: r.f, name: r.name, score: Math.round(sc(r) * 100), w: r.w, d: r.d, l: r.l, mateW: r.mateW, mateL: r.mateL, dk: r.dk, plies: Math.round(r.plies / r.n), vs: Object.fromEntries(Object.entries(r.vs).map(([k, v]) => [k, Math.round(sc(v) * 100)])) })), PS };
+}
+</script>
+</body></html>

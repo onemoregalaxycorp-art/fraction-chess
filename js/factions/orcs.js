@@ -5,7 +5,9 @@
     desc: 'Агрессия, прорывы и прыжки через фигуры. Орк-воин, Вождь, Хоп-гоблин и Шаман едят две фигуры подряд, если они стоят вплотную друг к другу.',
     back: ['orc_warrior', 'rider', 'rogue', 'chief', 'shaman', 'rogue', 'rider', 'orc_warrior'], pawn: 'goblin'
   });
-  const WARRIOR_RANGE = 4;
+  const WARRIOR_RANGE = 5;   // Большой орк-воин
+  const DBL_RANGE = 4;       // двойной прорыв Вождя и Плута: второй враг не дальше 4 клеток (у Орка-воина — его дальность 5)
+  const DBL_RULE = r => `«Двойной прорыв» (2-е нажатие): если между двумя врагами на линии есть свободные клетки, а второй стоит не дальше ${r} клеток, съедает обоих и шагает на 1 клетку дальше (если свободно).`;
   const DOUBLE = 'Двойное взятие: если сразу за взятой фигурой (вплотную, в том же направлении) стоит ещё один враг — съедает обоих и встаёт на место второго. Вражеского лидера вторым взятием съесть нельзя.';
   // второй целью двойного взятия не может быть вражеский лидер
   const capSecond = (c, x, y) => c.cap(x, y) && !c.G.def(c.G.at(x, y)).royal;
@@ -60,31 +62,38 @@
 
   FC.definePiece('rogue', {
     name: 'Гоблин-плут', faction: 'orcs', cls: 'bishop', abbr: 'Пл',
-    rules: ['Движется по диагонали.', 'За ход может перепрыгнуть не более одной союзной и не более одной вражеской фигуры.',
-      'Перепрыгнутые фигуры не берутся; взятие — только завершив ход на клетке врага.', 'Двойного взятия нет.'],
+    rules: ['Ходит и берёт как обычный слон — по диагонали на любое расстояние.', 'Перепрыгивать может только союзные фигуры; вражеская фигура останавливает его.',
+      '«Прорыв»: берёт первого врага на диагонали и обязан шагнуть ещё на 1 клетку дальше, если она свободна. Если занята — остаётся на клетке взятой фигуры.',
+      'Двух врагов вплотную одним ходом не берёт.', DBL_RULE(DBL_RANGE)],
+    special(c) { breakthrough(c, true, FC.DIAG, DBL_RANGE); if (!c.acts.length) c.note('Нет диагонали с двумя врагами (с промежутком) для двойного прорыва.'); },
     normal(c) {
-      const G = c.G;
+      const G = c.G, p = c.p, fx = c.x, fy = c.y;
       for (const [dx, dy] of FC.DIAG) {
-        let ja = false, je = false;
+        let jumped = false;
         for (let k = 1; k < 8; k++) {
-          const tx = c.x + dx * k, ty = c.y + dy * k;
+          const tx = fx + dx * k, ty = fy + dy * k;
           if (!G.inB(tx, ty)) break;
           const q = G.at(tx, ty);
-          const lbl = (ja || je) ? ' (с прыжком)' : '';
-          if (!q) { c.melee(tx, ty, 'Перемещение' + lbl); continue; }
-          if (q.owner === c.p.owner) { if (ja) break; ja = true; continue; }
-          if (c.cap(tx, ty)) c.melee(tx, ty, 'Взятие' + lbl);
-          if (je) break;
-          je = true;
+          if (!q) { c.melee(tx, ty, jumped ? 'Перемещение (через союзника)' : 'Перемещение'); continue; }
+          if (q.owner === c.side) { jumped = true; continue; }      // союзника перепрыгивает
+          if (c.cap(tx, ty)) {
+            const l1 = [tx + dx, ty + dy], free = G.empty(l1[0], l1[1]);
+            c.add('capture', tx, ty, free ? 'Прорыв: взятие + шаг вперёд' : 'Прорыв: взятие (шаг вперёд невозможен)', g => {
+              g.capture(tx, ty, p);
+              const L = g.empty(l1[0], l1[1]) ? l1 : [tx, ty];
+              g.move(fx, fy, L[0], L[1]);
+            });
+          }
+          break;                                                    // через врага — нельзя
         }
       }
     }
   });
 
-  function breakthrough(c, dbl2) {
+  function breakthrough(c, dbl2, dirs, range) {
     const G = c.G, p = c.p, fx = c.x, fy = c.y;
-    for (const [dx, dy] of FC.ORTH) {
-      for (let k = 1; k <= WARRIOR_RANGE; k++) {
+    for (const [dx, dy] of dirs) {
+      for (let k = 1; k <= range; k++) {
         const tx = fx + dx * k, ty = fy + dy * k;
         if (!G.inB(tx, ty)) break;
         if (!G.at(tx, ty)) { if (!dbl2) c.melee(tx, ty); continue; }
@@ -98,7 +107,7 @@
           });
           dbl(c, tx, ty, dx, dy, stepOn(dx, dy));
         } else if (G.empty(l1[0], l1[1])) {
-          for (let m = k + 2; m <= WARRIOR_RANGE; m++) {
+          for (let m = k + 2; m <= range; m++) {
             const ux = fx + dx * m, uy = fy + dy * m;
             if (!G.inB(ux, uy)) break;
             if (!G.at(ux, uy)) continue;
@@ -122,10 +131,9 @@
     name: 'Большой орк-воин', faction: 'orcs', cls: 'rook', abbr: 'Ор',
     rules: [`По вертикали/горизонтали до ${WARRIOR_RANGE} клеток, без прыжков.`,
       `«Прорыв»: берёт первого врага на линии (в пределах ${WARRIOR_RANGE}) и обязан шагнуть на 1 клетку дальше, если она свободна.`,
-      'Два врага вплотную друг к другу — съедает обоих и шагает дальше (1-е нажатие).',
-      `2-е нажатие — двойной прорыв, когда между врагами есть свободные клетки (второй враг в пределах ${WARRIOR_RANGE} клеток от старта).`],
-    normal(c) { breakthrough(c, false); },
-    special(c) { breakthrough(c, true); if (!c.acts.length) c.note('Нет линии с двумя врагами (с промежутком) для двойного прорыва.'); }
+      'Два врага вплотную друг к другу — съедает обоих и шагает дальше.', DBL_RULE(WARRIOR_RANGE)],
+    normal(c) { breakthrough(c, false, FC.ORTH, WARRIOR_RANGE); },
+    special(c) { breakthrough(c, true, FC.ORTH, WARRIOR_RANGE); if (!c.acts.length) c.note('Нет линии с двумя врагами (с промежутком) для двойного прорыва.'); }
   });
 
   FC.definePiece('rider', {
@@ -143,7 +151,7 @@
     name: 'Вождь орды', faction: 'orcs', cls: 'queen', abbr: 'Вж',
     rules: ['«Рывок завоевателя» (1-е нажатие): ходит как ферзь; после взятия обязан шагнуть ещё на 1 клетку в том же направлении, если она свободна.',
       'Два врага вплотную друг к другу — съедает обоих, затем шаг на 1 клетку.',
-      '«Неудержимая ярость» (2-е нажатие): враг вплотную + следующий враг на той же линии — оба уничтожаются, Вождь перепрыгивает всё и встаёт на самую дальнюю свободную клетку к краю.'],
+      '«Неудержимая ярость» (2-е нажатие): враг вплотную + следующий враг на той же линии — оба уничтожаются, Вождь перепрыгивает всё и встаёт на самую дальнюю свободную клетку к краю.', DBL_RULE(DBL_RANGE)],
     normal(c) {
       const G = c.G, p = c.p, fx = c.x, fy = c.y;
       for (const [dx, dy] of FC.ALL8) {
@@ -182,7 +190,8 @@
           break;
         }
       }
-      if (!c.acts.length) c.note('«Ярость» требует врага вплотную и ещё одного врага дальше на той же линии.');
+      breakthrough(c, true, FC.ALL8, DBL_RANGE);
+      if (!c.acts.length) c.note('«Ярость» требует врага вплотную и ещё одного врага дальше на той же линии; «Двойной прорыв» — двух врагов на линии с промежутком.');
     }
   });
 
@@ -202,6 +211,7 @@
         const mx = c.x + dx, my = c.y + dy, tx = c.x + 2 * dx, ty = c.y + 2 * dy;
         if (!G.inB(tx, ty)) continue;
         if (G.at(mx, my)) { if (c.cap(tx, ty)) { c.block(mx, my); blocked++; } continue; }
+        c.zone(tx, ty);
         if (c.cap(tx, ty)) c.ranged(tx, ty, 'Магическая атака (ровно 2 клетки)');
       }
       if (blocked) c.note(`Целей, закрытых фигурой посередине: ${blocked}.`);

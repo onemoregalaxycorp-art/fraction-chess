@@ -1,0 +1,7 @@
+# сборки: web\ собирается на GitHub (Actions → Pages), exe выкладывается в Releases
+web/
+dist/
+# служебное
+.claude/
+*.top.png
+*.glb.json

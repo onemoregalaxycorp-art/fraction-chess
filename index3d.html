@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Fraction Chess — 3D</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style3d.css">
+</head>
+<body class="view3d">
+  <div id="setup" class="screen">
+    <h1>FRACTION CHESS</h1>
+    <p class="sub">v0.2 · 3D-поле боя</p>
+    <div class="setup-grid">
+      <div class="pcard">
+        <h3>Белые · Игрок 1</h3>
+        <select id="f0"></select>
+        <label class="chk"><input type="checkbox" id="ai0"> Управляет компьютер</label>
+        <div class="fdesc" id="fd0"></div>
+      </div>
+      <div class="pcard">
+        <h3>Чёрные · Игрок 2</h3>
+        <select id="f1"></select>
+        <label class="chk"><input type="checkbox" id="ai1"> Управляет компьютер</label>
+        <div class="fdesc" id="fd1"></div>
+      </div>
+    </div>
+    <button id="startBtn" class="big">Бросить монету и начать</button>
+    <p><button class="cardsBtn">📖 Справочник фигур</button> <a class="viewlink" href="index.html">Классический 2D-вид →</a></p>
+    <p class="hint">Цель — поставить мат вражескому лидеру. 1-е нажатие на фигуру — обычные ходы, 2-е — особые способности.</p>
+  </div>
+
+  <div id="coin" class="overlay hidden">
+    <div class="coinbox">
+      <h2>Жеребьёвка</h2>
+      <div class="coinstage"><div id="coinEl" class="coin"><div class="face front">Б</div><div class="face back">Ч</div></div></div>
+      <div id="coinText">&nbsp;</div>
+      <button id="coinOk" class="big hidden">Начать партию</button>
+    </div>
+  </div>
+
+  <div id="game" class="hidden">
+    <div class="left">
+      <div id="banner"></div>
+      <div id="camctl">
+        <span class="grp"><button data-preset="iso" class="on">Изометрия</button><button data-preset="angled">Под углом</button><button data-preset="top">Сверху</button></span>
+        <span class="grp"><button id="rotL" title="Повернуть камеру (Q)">⟲</button><button id="rotR" title="Повернуть камеру (E)">⟳</button></span>
+        <span class="grp"><button id="zoomOut" title="Отдалить (−)">−</button><button id="zoomIn" title="Приблизить (+)">+</button></span>
+        <label class="chk"><input type="checkbox" id="follow" checked> Камера за игроком</label>
+      </div>
+      <div id="stage">
+        <div id="cam">
+          <div id="table">
+            <div class="tside ts-s"></div><div class="tside ts-n"></div><div class="tside ts-e"></div><div class="tside ts-w"></div>
+            <div id="board"></div>
+          </div>
+        </div>
+      </div>
+      <div id="legend"></div>
+    </div>
+    <div class="right">
+      <div id="players"></div>
+      <div class="panel"><div id="info"></div></div>
+      <div class="panel logp"><h3>Журнал</h3><div id="log"></div></div>
+      <div class="btns"><button id="undoBtn" title="Ctrl+Z">↶ Ход назад</button><button id="redoBtn" title="Ctrl+Y">↷ Ход вперёд</button><button class="cardsBtn">📖 Справочник фигур</button><button id="rulesBtn">Правила</button><button id="newGame">Новая игра</button></div>
+    </div>
+  </div>
+
+  <div id="cards" class="hidden">
+    <div class="cardsHead">
+      <h2>📖 Справочник фигур</h2>
+      <div id="cardTabs"></div>
+      <button id="cardsClose">✕ Закрыть</button>
+    </div>
+    <div class="dlegend">
+      <span><span class="dm m-move"></span> ход</span><span><span class="da a-capture"></span> ближнее взятие</span>
+      <span><span class="da a-ranged"></span> дальняя атака</span><span><span class="da a-convert"></span> превращение</span>
+      <span><span class="dm m-summon"></span> призыв</span><span><span class="dm m-special"></span> особый ход</span>
+      <span class="muted">Схемы — для белых на пустой доске (вперёд = вверх). Пешки показаны с начальной позиции.</span>
+    </div>
+    <div id="cardList"></div>
+  </div>
+
+  <div id="modal" class="overlay hidden"><div class="modalbox"><div id="modalText"></div><div id="modalBtns"></div></div></div>
+  <div id="tip" class="hidden"></div>
+
+  <script>window.FC = { VIEW: '3d' };</script>
+  <script src="js/engine.js"></script>
+  <script src="js/factions/humans.js"></script>
+  <script src="js/factions/orcs.js"></script>
+  <script src="js/factions/demons.js"></script>
+  <script src="js/factions/undead.js"></script>
+  <script src="js/factions/dwarves.js"></script>
+  <script src="js/factions/elves.js"></script>
+  <script src="js/factions/chthon.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/camera3d.js"></script>
+</body>
+</html>

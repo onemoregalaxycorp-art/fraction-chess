@@ -10,35 +10,57 @@ const MOBILE = matchMedia('(pointer: coarse)').matches;   // сенсорный 
 /* ---------- разметка доски диорамы (координаты Blender: Z вверх) ----------
    Диорама собрана tools/make_board8.py: болото Meshy + модельная доска 8×8 из квадратных плиток.
    Значения — из models/boards/swamp.glb.json. */
-const BOARD = {
-  X0: -0.4434, CW: 0.11036,        // левая граница колонки a и ширина клетки
-  Y0: -0.58601, RH: 0.11036,       // нижняя граница ряда 1 (сторона белых, −Y) и высота клетки
-  ZS: -0.1056,                     // высота верха плиток
+/* Доски: болото (по умолчанию) и адская доска Демонов (tools/convert_board.py, поворот 90° — a1 тёмная).
+   X0/CW — левая граница колонки a и ширина клетки; Y0/RH — нижняя граница ряда 1 (сторона белых, −Y) и высота клетки;
+   ZS — высота верха светлых плиток; ZD — насколько ниже тёмные плитки (у демонов они утоплены).
+   lights — точечные источники [x, y (Blender), цвет, сила]; rim — контровой свет; fog — цвет тумана; flies — цвет искр. */
+const BOARDS = {
+  swamp: { path: 'boards/swamp', X0: -0.4434, CW: 0.11036, Y0: -0.58601, RH: 0.11036, ZS: -0.1056, ZD: 0,
+    lights: [[-0.371, 0.389, 0xffa64d, 6], [0.367, 0.395, 0xffa64d, 6]], rim: 0x7cff9a, fog: 0x0a0c12, flies: 0x9dff7a, own: 'north' },
+  demons: { path: 'boards/demons', X0: -0.664, CW: 0.1663, Y0: -0.592, RH: 0.154, ZS: -0.1592, ZD: -0.0296,
+    lights: [[-0.8, 0.5, 0xff5a1f, 9], [0.62, -0.72, 0xff3b1f, 9], [0.27, -0.78, 0xff7a2a, 6], [0.75, 0.75, 0xff4020, 5]],
+    rim: 0xff4a2a, fog: 0x120707, flies: 0xff8a3a, own: 'south' },
 };
-BOARD.CX = BOARD.X0 + 4 * BOARD.CW;                       // центр игровой области
-BOARD.CY = BOARD.Y0 + 4 * BOARD.RH;
-const S = 1 / ((BOARD.CW + BOARD.RH) / 2);                // масштаб: средняя клетка = 1
-const CELL_W = BOARD.CW * S, CELL_H = BOARD.RH * S;
-const cellPos = (gx, gy) => new THREE.Vector3(
-  (BOARD.X0 + (gx + 0.5) * BOARD.CW - BOARD.CX) * S, 0,
-  -(BOARD.Y0 + (gy + 0.5) * BOARD.RH - BOARD.CY) * S);
+// у какой фракции какая доска (остальные — болото)
+const FACTION_BOARD = { demons: 'demons', undead: 'swamp' };
+for (const b of Object.values(BOARDS)) { b.CX = b.X0 + 4 * b.CW; b.CY = b.Y0 + 4 * b.RH; }
+/* Игровое поле общее для обеих половин: клетка 1×1, центр доски в (0,0); ряды 1–4 (белые) — z > 0, ряды 5–8 — z < 0.
+   Каждая диорама масштабируется так, чтобы её клетки совпали с этой сеткой, и обрезается по середине доски. */
+const CELL_W = 1, CELL_H = 1;
+let halves = [null, null];          // ключи досок: [половина белых, половина чёрных]
+// захваченные клетки: 'x,y' → ключ доски, в дизайн которой клетка перекрашена (фигура чужой фракции встала на неё)
+const conv = new Map();
+const TILE_TOP = 0.004;            // верх плитки-«заплатки» захваченной клетки
+// высота клетки: на демонической половине тёмные плитки утоплены
+const cellY = (gx, gy) => {
+  if (!Number.isInteger(gx) || !Number.isInteger(gy)) return 0;
+  if (conv.has(gx + ',' + gy)) return TILE_TOP;
+  if ((gx + gy) % 2 !== 0) return 0;
+  const b = BOARDS[halves[gy < 4 ? 0 : 1] || 'swamp'];
+  return b.ZD / b.RH;
+};
+const cellPos = (gx, gy) => new THREE.Vector3(gx + 0.5 - 4, cellY(gx, gy), -(gy + 0.5 - 4));
 function worldToCell(p) {
-  const bx = p.x / S + BOARD.CX, by = -p.z / S + BOARD.CY;
-  const gx = Math.floor((bx - BOARD.X0) / BOARD.CW), gy = Math.floor((by - BOARD.Y0) / BOARD.RH);
+  const gx = Math.floor(p.x + 4), gy = Math.floor(-p.z + 4);
   return gx >= 0 && gx < 8 && gy >= 0 && gy < 8 ? [gx, gy] : null;
 }
+// точка диорамы (координаты Blender x, y) → мир
+const boardToWorld = (b, bx, by, h = 0) => new THREE.Vector3((bx - b.CX) / b.CW, h, -(by - b.CY) / b.RH);
 
 /* ---------- модели фигур ---------- */
 const MODEL_FOR = {
   skeleton: 'undead/skeleton', skeleton_mage: 'undead/skeleton', skeleton_warrior: 'undead/skeleton',
   lich: 'undead/lich', phylactery: 'undead/phylactery', graveyard: 'undead/graveyard',
   soul_eater: 'undead/soul_eater', death_knight: 'undead/death_knight',
+  imp: 'demons/imp', demon_king: 'demons/demon_king', summoner: 'demons/summoner', devourer: 'demons/devourer', obelisk: 'demons/obelisk', guard: 'demons/guard', satyr: 'demons/satyr',
 };
+const MODEL_H = { satyr: 1.45 };   // своя высота модели (Сатир по правилам пешка, но это превращённый Имп — крупнее)
 const HEIGHT = { pawn: 1.15, knight: 1.4, bishop: 1.4, rook: 1.45, queen: 1.7, king: 1.75 };
 const OWNER_COLOR = [0xefe8d8, 0x1d2029];
 
 let renderer, scene, camera, controls, clock, raycaster, pointer;
 let boardGroup, piecesGroup, hlGroup, fxGroup, pickPlane, hoverMark;
+let rimLight, boardLights, ground, labelGroup;
 const models = {};                 // путь → { scene, size }
 const pieces = new Map();          // id фигуры → { obj, x, y, type, owner, stat }
 const anims = [];                  // активные анимации
@@ -51,6 +73,7 @@ function init() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, MOBILE ? 1.5 : 2));   // телефон: меньше пикселей — плавнее и холоднее
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.localClippingEnabled = true;          // доска из двух половин разных фракций
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.45;
   host.appendChild(renderer.domElement);
@@ -74,18 +97,14 @@ function init() {
   Object.assign(moon.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 40 });
   moon.shadow.bias = -0.0004;
   scene.add(moon);
-  const rim = new THREE.DirectionalLight(0x7cff9a, 0.6); rim.position.set(-8, 5, -9); scene.add(rim);
-  for (const [bx, by] of [[-0.371, 0.389], [0.367, 0.395]]) {
-    const l = new THREE.PointLight(0xffa64d, 6, 7, 2);
-    l.position.set((bx - BOARD.CX) * S, 1.2, -(by - BOARD.CY) * S);
-    scene.add(l);
-  }
+  rimLight = new THREE.DirectionalLight(0x7cff9a, 0.6); rimLight.position.set(-8, 5, -9); scene.add(rimLight);
+  boardLights = new THREE.Group(); scene.add(boardLights);       // свечи / лава — у каждой доски свои
 
   boardGroup = new THREE.Group(); piecesGroup = new THREE.Group(); hlGroup = new THREE.Group(); fxGroup = new THREE.Group();
   scene.add(boardGroup, piecesGroup, hlGroup, fxGroup);
 
   // земля под диорамой и невидимая плоскость для кликов
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshStandardMaterial({ color: 0x0d1210, roughness: 1 }));
+  ground = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshStandardMaterial({ color: 0x0d1210, roughness: 1 }));
   ground.rotation.x = -Math.PI / 2; ground.position.y = -1.05; ground.receiveShadow = true; scene.add(ground);
   pickPlane = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ visible: false }));
   pickPlane.rotation.x = -Math.PI / 2; scene.add(pickPlane);
@@ -115,18 +134,18 @@ function resize() {
 function loadAssets() {
   const status = document.getElementById('glstatus');
   const loader = new GLTFLoader();
-  const paths = ['boards/swamp', ...new Set(Object.values(MODEL_FOR))];
+  const paths = [...Object.values(BOARDS).map(b => b.path), ...new Set(Object.values(MODEL_FOR))];
   let done = 0;
   const one = p => new Promise(res => loader.load(`models/${p}.glb`, g => {
     const root = g.scene;
     root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     const box = new THREE.Box3().setFromObject(root), size = box.getSize(new THREE.Vector3());
-    models[p] = { scene: root, size };
+    models[p] = { scene: root, size, min: box.min.clone() };
     status.textContent = `Загрузка 3D-моделей… ${++done}/${paths.length}`;
     res(true);
   }, undefined, () => { status.textContent = `Не удалось загрузить models/${p}.glb`; res(false); }));
-  Promise.all(paths.map(one)).then(ok => {
-    if (!ok[0]) proceduralBoard(); else placeDiorama();
+  Promise.all(paths.map(one)).then(() => {
+    switchBoard(pendingModel ? boardFor(pendingModel.game) : ['swamp', 'swamp'], true);
     ready = true;
     status.classList.add('hidden');
     if (location.protocol === 'file:') {
@@ -136,12 +155,125 @@ function loadAssets() {
     if (pendingModel) render(pendingModel);
   });
 }
-function placeDiorama() {
-  const d = models['boards/swamp'].scene;
-  d.scale.setScalar(S);
-  d.position.set(-BOARD.CX * S, -BOARD.ZS * S, BOARD.CY * S);
-  d.traverse(o => { if (o.isMesh) { o.castShadow = false; } });
-  boardGroup.add(d);
+// доска партии: каждая половина — доска фракции, которая на ней стоит (белые — ряды 1–4, чёрные — 5–8)
+function boardFor(G) {
+  const f = G && G.players ? G.players.map(p => p.faction) : [];
+  return [0, 1].map(i => FACTION_BOARD[f[i]] || 'swamp');
+}
+// своя копия диорамы со своими материалами (у двух половин разные плоскости обрезки)
+const dioramaCache = {};
+function diorama(key, side) {
+  const id = key + ':' + side;
+  if (dioramaCache[id]) return dioramaCache[id];
+  const m = models[BOARDS[key].path]; if (!m) return null;
+  const d = m.scene.clone(true);
+  d.traverse(o => { if (o.isMesh) { o.castShadow = false; o.material = o.material.clone(); } });
+  return dioramaCache[id] = d;
+}
+function switchBoard(keys, force) {
+  if (!force && keys[0] === halves[0] && keys[1] === halves[1]) return;
+  halves = keys.slice();
+  clearConv(); convGame = null;
+  for (const k in tileTex) { tileTex[k].dispose(); delete tileTex[k]; }
+  boardGroup.clear();
+  // фигуры стоят по старой высоте клеток — снимаем, render() расставит заново
+  piecesGroup.clear(); pieces.clear();
+  const same = keys[0] === keys[1];
+  let groundY = -1.05, any = false;
+  boardLights.clear();
+  keys.forEach((key, side) => {
+    if (same && side === 1) return;                       // одна и та же доска — целиком, без шва
+    const b = BOARDS[key], d = diorama(key, side), m = models[b.path];
+    if (!d) return;
+    any = true;
+    d.scale.set(1 / b.CW, 1 / ((b.CW + b.RH) / 2), 1 / b.RH);
+    d.position.set(-b.CX / b.CW, -b.ZS / ((b.CW + b.RH) / 2), b.CY / b.RH);
+    // фракции всегда достаётся «своя» половина доски (b.own: south — ряды 1–4 диорамы, у демонов сторона с котлом;
+    // north — ряды 5–8, у болота сторона со свечами). Если она не с той стороны — разворот на 180° (цвета клеток не меняются).
+    const flip = !same && ((b.own === 'south') !== (side === 0));
+    const pivot = new THREE.Group(); pivot.add(d);
+    pivot.rotation.y = flip ? Math.PI : 0;
+    const plane = same ? null : new THREE.Plane(new THREE.Vector3(0, 0, side ? -1 : 1), 0);
+    d.traverse(o => { if (o.isMesh) o.material.clippingPlanes = plane ? [plane] : null; });
+    boardGroup.add(pivot);
+    groundY = Math.min(groundY, (m.min.y - b.ZS) / ((b.CW + b.RH) / 2) - 0.02);
+    // свет этой доски — только тот, что стоит на её «своей» половине
+    for (const [bx, by, col, pow] of b.lights) {
+      const p = boardToWorld(b, bx, by, 1.2);
+      if (!same && (b.own === 'south' ? p.z < 0 : p.z > 0)) continue;
+      if (flip) { p.x = -p.x; p.z = -p.z; }
+      const l = new THREE.PointLight(col, pow, 7, 2); l.position.copy(p); boardLights.add(l);
+    }
+  });
+  if (!any) proceduralBoard();
+  ground.position.y = groundY;
+  // атмосфера — смесь двух досок
+  const B0 = BOARDS[keys[0]], B1 = BOARDS[keys[1]];
+  const mix = (a, b) => new THREE.Color(a).lerp(new THREE.Color(b), 0.5);
+  rimLight.color.copy(mix(B0.rim, B1.rim));
+  scene.fog.color.copy(mix(B0.fog, B1.fog)); scene.background.copy(scene.fog.color);
+  ground.material.color.copy(mix(keys[0] === 'demons' ? 0x160909 : 0x0d1210, keys[1] === 'demons' ? 0x160909 : 0x0d1210));
+  if (fireflies) fireflies.material.color.copy(mix(B0.flies, B1.flies));
+  addLabels();
+  scene.remove(hoverMark); hoverMark = cellFrame(0xffffff, 0.35); hoverMark.visible = false; scene.add(hoverMark);
+}
+/* ---------- захват клеток: клетка на чужой половине перекрашивается в дизайн доски фракции, которая на неё встала ----------
+   Картинку клетки снимаем ортокамерой сверху с настоящей доски этой фракции (без фигур и подсветки), по одной на цвет клетки. */
+let tileGroup = null, convGame = null;
+const tileTex = {};
+function captureTile(key, parity) {
+  const id = key + ':' + parity;
+  if (tileTex[id]) return tileTex[id];
+  const s = halves[0] === key ? 0 : 1, gy = s === 0 ? 1 : 6;
+  const gx = (3 + gy) % 2 === parity ? 3 : 4;
+  const p = cellPos(gx, gy);
+  const cam = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0.05, 20);
+  cam.up.set(0, 0, -1); cam.position.set(p.x, 4, p.z); cam.lookAt(p.x, -1, p.z);
+  const hide = [piecesGroup, hlGroup, fxGroup, labelGroup, hoverMark, fireflies, tileGroup].filter(Boolean);
+  const vis = hide.map(o => o.visible); hide.forEach(o => { o.visible = false; });
+  const pr = renderer.getPixelRatio(), sz = renderer.getSize(new THREE.Vector2()), fog = scene.fog;
+  scene.fog = null; renderer.setPixelRatio(1); renderer.setSize(256, 256, false);
+  renderer.render(scene, cam);
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  c.getContext('2d').drawImage(renderer.domElement, 0, 0, 256, 256);
+  renderer.setPixelRatio(pr); renderer.setSize(sz.x, sz.y, false); scene.fog = fog;
+  hide.forEach((o, i) => { o.visible = vis[i]; });
+  renderer.render(scene, camera);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return tileTex[id] = tex;
+}
+const homeBoard = (x, y) => halves[y < 4 ? 0 : 1];
+function clearConv() {
+  conv.clear();
+  if (tileGroup) { tileGroup.traverse(o => { if (o.isMesh) { o.geometry.dispose(); [].concat(o.material).forEach(m => m.dispose()); } }); tileGroup.clear(); }
+}
+// клетка (x, y) теперь в дизайне доски key; delay — когда фигура до неё дойдёт
+function setConv(x, y, key, delay) {
+  const k = x + ',' + y;
+  const old = tileGroup.children.find(o => o.userData.cell === k);
+  if (old) { tileGroup.remove(old); old.geometry.dispose(); [].concat(old.material).forEach(m => m.dispose()); }
+  if (key === homeBoard(x, y)) { conv.delete(k); return; }          // вернулась к хозяину половины
+  conv.set(k, key);
+  const top = new THREE.MeshBasicMaterial({ map: captureTile(key, (x + y) % 2), transparent: true, opacity: 0 });
+  const side = new THREE.MeshStandardMaterial({ color: key === 'demons' ? 0x3a0d0a : 0x23261f, roughness: 0.9, transparent: true, opacity: 0 });
+  const h = 0.3, mesh = new THREE.Mesh(new THREE.BoxGeometry(1, h, 1), [side, side, top, side, side, side]);
+  const p = cellPos(x, y); mesh.position.set(p.x, TILE_TOP - h / 2, p.z);
+  mesh.receiveShadow = true; mesh.userData.cell = k;
+  tileGroup.add(mesh);
+  // плитка проявляется, когда фигура встаёт на клетку
+  anims.push({ t: -delay, dur: 0.45, f: q => { const v = Math.max(0, q); top.opacity = side.opacity = v; },
+    end: () => { top.transparent = side.transparent = false; top.opacity = side.opacity = 1; top.needsUpdate = side.needsUpdate = true; } });
+}
+// у каждой фигуры на доске — дизайн доски её фракции под ногами
+function updateConv(model, delayFor) {
+  if (!tileGroup) { tileGroup = new THREE.Group(); scene.add(tileGroup); }
+  if (model.game !== convGame) { clearConv(); convGame = model.game; }
+  if (halves[0] === halves[1]) return;                                  // одна доска на всех — нечего перекрашивать
+  for (const c of model.cells) {
+    if (!c.p || !c.def) continue;
+    const key = FACTION_BOARD[c.def.faction] || 'swamp', k = c.x + ',' + c.y;
+    if ((conv.get(k) || homeBoard(c.x, c.y)) !== key) setConv(c.x, c.y, key, delayFor(c));
+  }
 }
 function proceduralBoard() {   // запасной вариант без диорамы
   const g = new THREE.BoxGeometry(CELL_W, 0.2, CELL_H);
@@ -191,7 +323,7 @@ function makePiece(p, def) {
   let top;
   if (m) {
     const inst = m.scene.clone(true);
-    const h = HEIGHT[def.cls] || 1.4;
+    const h = MODEL_H[p.type] || HEIGHT[def.shape || def.cls] || 1.4;
     let k = h / m.size.y;
     const wide = Math.max(m.size.x, m.size.z) * k;
     if (wide > 0.92) k *= 0.92 / wide;
@@ -201,14 +333,15 @@ function makePiece(p, def) {
     root.add(inst); root.userData.body = inst;
     top = m.size.y * k + 0.15;
   } else {
-    const pts = LATHE[def.cls].map(([r, y]) => new THREE.Vector2(r, y * (HEIGHT[def.cls] / 1.6)));
+    const shape = def.shape || def.cls;   // def.shape — свой силуэт фигуры (например, Инженер не похож на пешку)
+    const pts = LATHE[shape].map(([r, y]) => new THREE.Vector2(r, y * (HEIGHT[shape] / 1.6)));
     const body = new THREE.Mesh(new THREE.LatheGeometry(pts, 32), new THREE.MeshStandardMaterial({
       color: OWNER_COLOR[p.owner], roughness: 0.35, metalness: 0.25,
       emissive: new THREE.Color(FC.FACTIONS[def.faction].color), emissiveIntensity: 0.08 }));
     body.position.y = 0.08; body.castShadow = body.receiveShadow = true;
     root.add(body); root.userData.body = body;
     top = pts[pts.length - 1].y + 0.1;
-    const glyph = textSprite(FC.GLYPH[def.cls], p.owner ? '#f3f4f6' : '#111827', FC.FACTIONS[def.faction].color, 128, 0.42);
+    const glyph = textSprite(def.glyph || FC.GLYPH[def.cls], p.owner ? '#f3f4f6' : '#111827', FC.FACTIONS[def.faction].color, 128, 0.42);
     glyph.position.y = top + 0.25; root.add(glyph); root.userData.glyph = glyph;
     top += 0.5;
   }
@@ -218,12 +351,13 @@ function makePiece(p, def) {
   return root;
 }
 function statusText(p) {
-  return (p.cooldown > 0 ? '⏳' : '') + (p.bloodlust > 0 ? '🩸' : '') + (p.cursedTtl > 0 ? '☠' : '') + (p.stolen ? '🎭' : '');
+  return (p.cooldown > 0 ? '⏳' : '') + (p.bloodlust > 0 ? '🩸' : '') + (p.cursedTtl > 0 ? '☠' : '') + (p.stolen ? '🎭' : '') +
+    (FC.statusIcons ? FC.statusIcons(p).map(s => s[0]).join('') : '');
 }
 
 /* ---------- подсветка ---------- */
 const HL_COLOR = { move: 0x22c55e, capture: 0xef4444, ranged: 0xf97316, summon: 0xa855f7, revive: 0x14b8a6,
-  convert: 0xc084fc, special: 0x3b82f6, pending: 0xfbbf24, block: 0x6b7280 };
+  convert: 0xc084fc, special: 0x3b82f6, pending: 0xfbbf24, block: 0x6b7280, zone: 0xfb923c };
 const matCache = {};
 const hlMat = (color, opacity = 0.85) => matCache[color + ':' + opacity] = matCache[color + ':' + opacity] ||
   new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide });
@@ -255,9 +389,46 @@ function highlight(c) {
     case 'special': { const d = flat(new THREE.PlaneGeometry(0.3, 0.3), m); d.rotation.z = Math.PI / 4; g.add(occ ? flat(new THREE.RingGeometry(0.4, 0.5, 4, 1, Math.PI / 4), m) : d); break; }
     case 'summon': case 'revive': g.add(flat(new THREE.PlaneGeometry(CELL_W * 0.6, CELL_H * 0.6), hlMat(col, hl.ghost ? 0.3 : 0.55))); break;
     case 'pending': g.add(cellFrame(col, 1), flat(new THREE.PlaneGeometry(CELL_W * 0.9, CELL_H * 0.9), hlMat(col, 0.25))); break;
+    // зона выстрела: прозрачная оранжевая клетка с прицелом — сюда фигура может выстрелить
+    case 'zone': {
+      g.add(flat(new THREE.PlaneGeometry(CELL_W * 0.86, CELL_H * 0.86), hlMat(col, 0.16)));
+      g.add(flat(new THREE.RingGeometry(0.16, 0.2, 28), hlMat(col, 0.55)));
+      for (const r of [0, Math.PI / 2]) { const l = flat(new THREE.PlaneGeometry(0.5, 0.025), hlMat(col, 0.45)); l.rotation.z = r; g.add(l); }
+      break;
+    }
   }
   if (hl.stolen) g.add(flat(new THREE.RingGeometry(0.54, 0.58, 40), hlMat(0xec4899, 0.9)));
   if (hl.ghost || hl.k === 'pending') makePulse(g);
+  return g;
+}
+
+// стрелка сдвига линии (ТХ'Зсал): плоская, лежит на клетке и смотрит туда, куда сдвинутся фигуры
+let arrowGeo = null;
+function lineArrow([dx, dy]) {
+  if (!arrowGeo) {
+    const s = new THREE.Shape();
+    s.moveTo(-0.3, -0.07); s.lineTo(0.06, -0.07); s.lineTo(0.06, -0.19); s.lineTo(0.32, 0);
+    s.lineTo(0.06, 0.19); s.lineTo(0.06, 0.07); s.lineTo(-0.3, 0.07); s.closePath();
+    arrowGeo = new THREE.ShapeGeometry(s);
+  }
+  // flat() кладёт фигуру на доску: локальная ось Y смотрит в -Z мира, а +y клетки — тоже в -Z
+  // рисуется поверх фигур, чтобы стрелку было видно и на занятых клетках
+  if (!lineArrow.mat) lineArrow.mat = new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.9, depthWrite: false, depthTest: false, side: THREE.DoubleSide });
+  const m = flat(arrowGeo.clone(), lineArrow.mat, 0.06);
+  m.rotation.z = Math.atan2(dy * CELL_H, dx * CELL_W);
+  m.renderOrder = 20;
+  return m;
+}
+
+// мерцание клеток при выборе сдвига линии (ТХ'Зсал, Ксал'Таргон): медленно и плавно, светло-фиолетовым
+// lvl 1 — всё доступное поле (ещё не выбрана клетка), 2 — линии через выбранную клетку, 3 — сама выбранная клетка
+function shiftPulse(lvl) {
+  const g = new THREE.Group();
+  const op = lvl === 1 ? 0.4 : lvl === 2 ? 0.62 : 0.78;
+  g.add(flat(new THREE.PlaneGeometry(CELL_W * 0.96, CELL_H * 0.96), hlMat(lvl === 3 ? 0xc4b5fd : 0xa78bfa, op), 0.025));
+  if (lvl >= 2) g.add(cellFrame(lvl === 3 ? 0xf5f3ff : 0xd8b4fe, 0.8));
+  makePulse(g);
+  g.traverse(o => { if (o.material) o.material.userData.slow = true; });
   return g;
 }
 
@@ -265,6 +436,8 @@ function highlight(c) {
 function render(model) {
   if (!ready) { pendingModel = model; return; }
   pendingModel = null;
+  switchBoard(boardFor(model.game));          // каждая половина — доска своей фракции
+  if (model.game !== convGame) { clearConv(); convGame = model.game; }   // новая партия — захваченных клеток нет
   const seen = new Set();
   let moveInfo = null;     // { fx, fy, tx, ty, dur } — ход фигуры: когда она доберётся до клетки жертвы
   for (const c of model.cells) {
@@ -277,13 +450,13 @@ function render(model) {
       const obj = makePiece(p, c.def);
       obj.position.copy(target);
       piecesGroup.add(obj);
-      e = { obj, x: c.x, y: c.y, type: p.type, owner: p.owner, stat: '' };
+      e = { obj, x: c.x, y: c.y, type: p.type, owner: p.owner, stat: '', baseY: target.y };
       pieces.set(p.id, e);
       if (lastTurn !== null) { obj.scale.setScalar(0.01); anims.push({ t: 0, dur: 0.35, f: k => obj.scale.setScalar(Math.max(0.01, easeOut(k))) }); }
     } else if (e.x !== c.x || e.y !== c.y) {
       if (model.mover && model.mover.pid === p.id) moveInfo = animateMove(e, c, target);
       else e.obj.position.copy(target);
-      e.x = c.x; e.y = c.y;
+      e.x = c.x; e.y = c.y; e.baseY = target.y;
     }
     // статусы и приподнятая выбранная фигура
     const st = statusText(p);
@@ -296,6 +469,9 @@ function render(model) {
     e.lifted = !!(model.sel && model.sel.x === c.x && model.sel.y === c.y);
     e.threatened = c.threatened;
   }
+  // захват клеток: под фигурой — дизайн доски её фракции (проявляется, когда ходящая фигура дойдёт)
+  updateConv(model, c => moveInfo && c.x === moveInfo.tx && c.y === moveInfo.ty ? moveInfo.dur * 0.85 : 0);
+  for (const e of pieces.values()) e.baseY = cellPos(e.x, e.y).y;
   // выстрел: стрелок достаёт трубу и стреляет; когда снаряд долетит — жертвы разбиваются
   let shotImpact = null, shotDeath = 'shatter';
   if (model.shot) { const se = pieces.get(model.shot.pid); if (se) { const r = fireShot(se, model.shot); shotImpact = r.impact; shotDeath = r.death; } }
@@ -327,19 +503,21 @@ function render(model) {
   hlGroup.clear();
   for (const c of model.cells) {
     const pos = cellPos(c.x, c.y);
-    const add = o => { o.position.x += pos.x; o.position.z += pos.z; hlGroup.add(o); };
+    const add = o => { o.position.x += pos.x; o.position.y += pos.y; o.position.z += pos.z; hlGroup.add(o); };
     if (c.cursed) add(flat(new THREE.PlaneGeometry(CELL_W * 0.96, CELL_H * 0.96), hlMat(0x6d28d9, 0.35), 0.02));
+    if (c.pulse) add(shiftPulse(c.pulse));
     if (c.hl) add(highlight(c));
+    if (c.arrow) add(lineArrow(c.arrow));
     if (c.block) { for (const r of [Math.PI / 4, -Math.PI / 4]) { const b = flat(new THREE.PlaneGeometry(0.7, 0.09), hlMat(HL_COLOR.block, 0.9)); b.rotation.z = r; add(b); } }
     if (c.threatened) add(makePulse(flat(new THREE.RingGeometry(0.5, 0.6, 40), hlMat(0xef4444, 0.9), 0.1)));
     if (c.boom && !(shotDeath !== 'shatter' && isShotHit(c.x, c.y))) boom(pos, hitDelay(c.x, c.y));
   }
   if (model.sel) {
     const f = cellFrame(model.sel.mode === 'special' ? 0x22d3ee : 0xfacc15, 1);
-    const pos = cellPos(model.sel.x, model.sel.y); f.position.x = pos.x; f.position.z = pos.z; hlGroup.add(f);
+    const pos = cellPos(model.sel.x, model.sel.y); f.position.copy(pos); hlGroup.add(f);
   }
   // новая партия — показать поле со своей стороны; смена хода — поворот только в режиме «к игроку»
-  if (model.game !== lastGame) { lastGame = model.game; lastTurn = model.turn; rot = 0; setView(); clearScorches(); }
+  if (model.game !== lastGame) { lastGame = model.game; lastTurn = model.turn; rot = 0; startPreset(); setView(); clearScorches(); }
   else if (model.turn !== lastTurn) { lastTurn = model.turn; if (camMode === 'turn') setView(); }
 }
 function boom(pos, delay = 0) {
@@ -365,7 +543,7 @@ function animateMove(e, c, target) {
     const h = 0.75 + 0.18 * cells;
     anims.push({ obj, t: 0, dur, f: k => {
       const q = easeInOut(k);
-      obj.position.lerpVectors(from, target, q); obj.position.y = Math.sin(q * Math.PI) * h;
+      obj.position.lerpVectors(from, target, q); obj.position.y += Math.sin(q * Math.PI) * h;
       // кувырок вперёд в полёте и «приседание» при отрыве и приземлении
       obj.rotation.x = dir.z * Math.sin(q * Math.PI) * 0.35; obj.rotation.z = -dir.x * Math.sin(q * Math.PI) * 0.35;
       const sq = k < 0.12 ? 1 - Math.sin(k / 0.12 * Math.PI) * 0.12 : k > 0.88 ? 1 - Math.sin((k - 0.88) / 0.12 * Math.PI) * 0.12 : 1;
@@ -376,7 +554,7 @@ function animateMove(e, c, target) {
     anims.push({ obj, t: 0, dur, f: k => {
       const q = easeInOut(k);
       obj.position.lerpVectors(from, target, q);
-      obj.position.y = Math.abs(Math.sin(q * Math.PI * Math.max(1, cells))) * 0.05;   // лёгкое покачивание на каждой клетке
+      obj.position.y += Math.abs(Math.sin(q * Math.PI * Math.max(1, cells))) * 0.05;   // лёгкое покачивание на каждой клетке
       const lean = Math.sin(k * Math.PI) * 0.16;                                         // наклон в сторону движения
       obj.rotation.x = dir.z * lean; obj.rotation.z = -dir.x * lean;
     }, end: () => { obj.rotation.x = obj.rotation.z = 0; } });
@@ -918,16 +1096,18 @@ const easeInOut = k => k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2
 let fireflies;
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  const spd = +(FC.SET && FC.SET.animSpeed) || 1;            // скорость анимаций из настроек
   for (let i = anims.length - 1; i >= 0; i--) {
-    const a = anims[i]; a.t += dt; const k = Math.min(1, a.t / a.dur); a.f(k);
+    const a = anims[i]; a.t += dt * spd; const k = Math.min(1, a.t / a.dur); a.f(k);
     if (k >= 1) { anims.splice(i, 1); if (a.end) a.end(); }
   }
   for (const e of pieces.values()) {
-    const goal = e.lifted ? 0.18 : 0;
+    const goal = (e.baseY || 0) + (e.lifted ? 0.18 : 0);   // baseY — высота клетки (тёмные клетки демонической доски утоплены)
     if (!anims.some(a => a.obj === e.obj)) e.obj.position.y += (goal - e.obj.position.y) * Math.min(1, dt * 10);
   }
   const pulse = 0.55 + 0.45 * Math.sin(t * 5);
-  hlGroup.traverse(o => { if (o.material && o.material.userData.base != null) o.material.opacity = o.material.userData.base * pulse; });
+  const slow = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * 2.2));     // медленное мерцание сдвига линий
+  hlGroup.traverse(o => { if (o.material && o.material.userData.base != null) o.material.opacity = o.material.userData.base * (o.material.userData.slow ? slow : pulse); });
   if (fireflies) {
     const a = fireflies.geometry.attributes.position, seed = fireflies.userData.seed;
     for (let i = 0; i < a.count; i++) a.setY(i, seed[i * 3 + 1] + Math.sin(t * 0.8 + seed[i * 3]) * 0.4);
@@ -949,10 +1129,13 @@ function addFireflies() {
   fireflies = new THREE.Points(g, new THREE.PointsMaterial({ color: 0x9dff7a, size: 0.09, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }));
   fireflies.userData.seed = seed; scene.add(fireflies);
 }
-function addLabels() {
+function addLabels() {   // буквы и цифры по краю доски — пересобираются при смене доски
+  if (!labelGroup) { labelGroup = new THREE.Group(); scene.add(labelGroup); }
+  labelGroup.traverse(o => { if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+  labelGroup.clear();
   for (let i = 0; i < 8; i++) {
-    const f = textSprite('abcdefgh'[i], '#d6c9a8', null, 64, 0.32); f.position.copy(cellPos(i, -0.62)); f.position.y = 0.15; scene.add(f);
-    const r = textSprite(String(i + 1), '#d6c9a8', null, 64, 0.32); r.position.copy(cellPos(-0.62, i)); r.position.y = 0.15; scene.add(r);
+    const f = textSprite('abcdefgh'[i], '#d6c9a8', null, 64, 0.32); f.position.copy(cellPos(i, -0.62)); f.position.y = 0.15; labelGroup.add(f);
+    const r = textSprite(String(i + 1), '#d6c9a8', null, 64, 0.32); r.position.copy(cellPos(-0.62, i)); r.position.y = 0.15; labelGroup.add(r);
   }
 }
 
@@ -985,7 +1168,7 @@ function bindInput() {
     if (!moved && down.b === 0) {
       const c = pick(e);
       if (c) {
-        if (down.touch) { const p = cellPos(c[0], c[1]); hoverMark.position.set(p.x, 0, p.z); hoverMark.visible = true; }
+        if (down.touch) { const p = cellPos(c[0], c[1]); hoverMark.position.copy(p); hoverMark.visible = true; }
         FC.UI.click(c[0], c[1]);
       } else if (down.touch) FC.UI.deselect();     // тап мимо доски — снять выбор (на телефоне нет правой кнопки)
     }
@@ -996,7 +1179,7 @@ function bindInput() {
     if (e.pointerType === 'touch') return;          // на сенсорном экране нет наведения
     if (e.buttons) { FC.UI.hover(null); hoverMark.visible = false; return; }
     const c = pick(e);
-    if (c) { const p = cellPos(c[0], c[1]); hoverMark.position.set(p.x, 0, p.z); hoverMark.visible = true; FC.UI.hover(c[0], c[1], e.clientX, e.clientY); }
+    if (c) { const p = cellPos(c[0], c[1]); hoverMark.position.copy(p); hoverMark.visible = true; FC.UI.hover(c[0], c[1], e.clientX, e.clientY); }
     else { hoverMark.visible = false; FC.UI.hover(null); }
   });
   el.addEventListener('pointerleave', () => { hoverMark.visible = false; FC.UI.hover(null); });
@@ -1026,6 +1209,13 @@ function setView(instant, keepAz) {
   }
   let daz = goal.az - sph.theta; daz = Math.atan2(Math.sin(daz), Math.cos(daz));
   tween = { t: 0, dur: 0.9, from: { polar: sph.phi, az: sph.theta, dist: sph.radius }, to: { polar: goal.polar, az: sph.theta + daz, dist: goal.dist } };
+}
+// вид при старте партии — из настроек (Камера → «Вид при старте партии»)
+function startPreset() {
+  const v = FC.SET && FC.SET.view;
+  if (!v || !PRESETS[v]) return;
+  preset = v;
+  for (const o of document.querySelectorAll('#views [data-preset]')) o.classList.toggle('on', o.dataset.preset === v);
 }
 function camTween(dt) {
   if (!tween) return;
@@ -1062,5 +1252,62 @@ function bindCameraUI() {
   });
 }
 
-FC.GL = { render, fxCount: () => fxGroup.children.length };   // fxCount — для автопроверки анимаций
+/* ---------- жеребьёвка: монетка подлетает над центром доски и падает стороной «Б» или «Ч» ---------- */
+function coinFace(letter, fg, bg) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#b8860b'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = bg; g.beginPath(); g.arc(128, 128, 112, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#facc15'; g.lineWidth = 10; g.beginPath(); g.arc(128, 128, 112, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 3; g.beginPath(); g.arc(128, 128, 92, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = 'bold 130px "Segoe UI",sans-serif';
+  g.fillText(letter, 128, 136);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function coinToss(first, done) {
+  if (!ready) { setTimeout(() => coinToss(first, done), 200); return; }
+  const R = 0.62;
+  const rim = new THREE.MeshStandardMaterial({ color: 0xd4a017, metalness: 0.85, roughness: 0.3, emissive: 0x3a2a00, emissiveIntensity: 0.4 });
+  const top = new THREE.MeshStandardMaterial({ map: coinFace('Б', '#111827', '#f3f4f6'), metalness: 0.4, roughness: 0.4 });
+  const bot = new THREE.MeshStandardMaterial({ map: coinFace('Ч', '#f3f4f6', '#111827'), metalness: 0.4, roughness: 0.4 });
+  const coin = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 0.09, 56), [rim, top, bot]);
+  coin.castShadow = true;
+  const c0 = cellPos(3.5, 3.5);
+  // монетка в «подвесе», развёрнутом к камере, — чтобы буква читалась ровно, откуда бы ни смотрел игрок
+  const holder = new THREE.Group();
+  holder.position.set(c0.x, 0, c0.z);
+  holder.rotation.y = Math.atan2(camera.position.x - c0.x, camera.position.z - c0.z) + Math.PI;
+  holder.add(coin); fxGroup.add(holder);
+  coin.position.set(0, 0.15, 0);
+  const glow = glowSprite(0xffd76a, 0.1); glow.position.set(c0.x, 0.2, c0.z); fxGroup.add(glow);
+  const D = 2.3, finalA = first === 0 ? 0 : Math.PI, spins = 7 * Math.PI * 2;
+  anims.push({ t: 0, dur: D, f: k => {
+    const h = Math.sin(Math.PI * k) * 3.4 * (1 - 0.15 * k);
+    coin.position.y = 0.15 + h;
+    coin.rotation.x = (spins + finalA) * easeOut(k);
+    coin.rotation.z = Math.sin(k * 9) * 0.25 * (1 - k);
+    glow.position.y = coin.position.y; glow.scale.setScalar(0.4 + h * 0.25); glow.material.opacity = 0.6 * Math.sin(Math.PI * k);
+  }, end: () => {
+    // приземление: лёгкий отскок, вспышка, затем монетка тает
+    const ring = flat(new THREE.RingGeometry(0.5, 0.62, 48), new THREE.MeshBasicMaterial({ color: 0xffd76a, transparent: true, depthWrite: false, side: THREE.DoubleSide }), 0.05);
+    ring.position.x = c0.x; ring.position.z = c0.z; fxGroup.add(ring);
+    anims.push({ t: 0, dur: 0.7, f: k => { ring.scale.setScalar(1 + k * 2.2); ring.material.opacity = 1 - k; coin.position.y = 0.15 + Math.abs(Math.sin(k * Math.PI * 2)) * 0.25 * (1 - k); },
+      end: () => { fxGroup.remove(ring); ring.geometry.dispose(); ring.material.dispose(); } });
+    later(1.6, () => anims.push({ t: 0, dur: 0.45, f: k => { coin.scale.setScalar(Math.max(0.01, 1 - k)); coin.position.y = 0.15 + k * 0.6; }, end: () => {
+      fxGroup.remove(holder, glow); coin.geometry.dispose(); [rim, top, bot].forEach(m => { if (m.map) m.map.dispose(); m.dispose(); }); glow.material.dispose();
+      if (done) done();
+    } }));
+  } });
+}
+
+// куда на экране смотрит направление доски (dx, dy) — угол в радианах (0 — вправо, +π/2 — вверх); для джойстика сдвига
+function screenAngle(dx, dy) {
+  if (!camera) return Math.atan2(dy, dx);
+  const a = cellPos(3.5, 3.5).project(camera), b = cellPos(3.5 + dx, 3.5 + dy).project(camera);
+  const aspect = renderer ? renderer.domElement.clientWidth / Math.max(1, renderer.domElement.clientHeight) : 1;
+  return Math.atan2(b.y - a.y, (b.x - a.x) * aspect);
+}
+FC.GL = { render, coinToss, screenAngle, fxCount: () => fxGroup.children.length, hlCount: () => hlGroup.children.length,
+  hlSnap: () => { const r = []; hlGroup.traverse(o => { if (o.material) r.push([o.material.opacity.toFixed(2), !!o.material.userData.slow, o.position.y.toFixed(3), o.parent && o.parent.position.x.toFixed(2)]); }); return r.slice(0, 6); },
+  shot: () => { renderer.render(scene, camera); return renderer.domElement.toDataURL('image/jpeg', 0.6); } };   // fxCount, hlCount, hlSnap, shot — для автопроверки
 if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', init); else init();

@@ -2,27 +2,13 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#0b0d13">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Fraction Chess">
-  <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icons/icon-192.png">
-  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-  <title>Fraction Chess — 3D-модели</title>
+  <title>Fraction Chess — прототип</title>
   <link rel="stylesheet" href="css/style.css">
-  <link rel="stylesheet" href="css/style3d.css">
-  <link rel="stylesheet" href="css/gl.css">
-  <link rel="stylesheet" href="css/hud.css">
-  <link rel="stylesheet" href="css/mobile.css">
 </head>
-<body class="view3d viewgl">
-  <div id="rotate"><div class="ph"></div><div>Поверните телефон горизонтально</div></div>
+<body>
   <div id="setup" class="screen">
     <h1>FRACTION CHESS</h1>
-    <p class="sub">v0.3 · поле боя с 3D-моделями</p>
+    <p class="sub">Прототип v0.1 · тактические шахматы фракций</p>
     <div class="setup-grid">
       <div class="pcard">
         <h3>Белые · Игрок 1</h3>
@@ -38,7 +24,7 @@
       </div>
     </div>
     <button id="startBtn" class="big">Бросить монету и начать</button>
-    <p><button class="cardsBtn">📖 Справочник фигур</button></p>
+    <p><button class="cardsBtn">📖 Справочник фигур</button> <a class="viewlink" href="index3d.html" style="color:#fbbf24;margin-left:12px">3D-вид поля →</a></p>
     <p class="hint">Цель — поставить мат вражескому лидеру. 1-е нажатие на фигуру — обычные ходы, 2-е — особые способности.</p>
   </div>
 
@@ -52,79 +38,17 @@
   </div>
 
   <div id="game" class="hidden">
-    <div id="stage"><div id="glhost"></div><div id="glstatus">Загрузка 3D-моделей…</div></div>
-
-    <!-- слева вверху: меню и журнал -->
-    <div id="hudTL">
-      <button id="menuBtn" class="hudbtn" title="Меню" aria-label="Меню"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-      <div id="logDock" class="hidden"><div class="dockHead">Журнал ходов</div><div id="log"></div></div>
-    </div>
-    <div id="menu" class="hudpanel hidden">
-      <button class="cardsBtn mi">📖 Справочник фигур</button>
-      <button id="rulesBtn" class="mi">📜 Правила</button>
-      <button id="newGame" class="mi">⟲ Новая игра</button>
-      <div class="mrow"><button id="undoBtn" class="mi" title="Ctrl+Z">↶ Ход назад</button><button id="redoBtn" class="mi" title="Ctrl+Y">↷ Ход вперёд</button></div>
-      <div class="mrow"><button id="logBtn" class="mi">📋 Журнал ходов</button><button id="logEye" class="mi eye" title="Показывать журнал слева на экране" aria-label="Показывать журнал на экране"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
-      <button id="animBtn" class="mi">🎬 Анимации</button>
-      <div class="msec">Камера</div>
-      <label class="mopt"><input type="radio" name="cammode" value="free"> Свободная — остаётся, как вы её повернули</label>
-      <label class="mopt"><input type="radio" name="cammode" value="turn"> Поворот к игроку после каждого хода</label>
-      <div class="mrow"><button id="rotL" class="mi" title="Повернуть (Q)">⟲ Повернуть</button><button id="rotR" class="mi" title="Повернуть (E)">Повернуть ⟳</button></div>
-    </div>
-
-    <!-- вкладка «Анимации»: выбор анимаций фигур -->
-    <div id="animPanel" class="hudpanel hidden">
-      <button id="animClose" class="xbtn" aria-label="Закрыть">✕</button>
-      <h3>🎬 Анимации</h3>
-      <div class="asec"><span class="fdot" style="--fc:#3b82f6"></span>Люди · Жрец — дальняя атака</div>
-      <div class="atiles" data-key="priest">
-        <button class="atile" data-val="prayer" title="Жрец встаёт на колени и молится, с неба бьёт столб света">
-          <svg viewBox="0 0 64 64"><path class="a-gold" d="M42 4v40M50 4v40M46 2v4"/><path class="a-gold" d="M38 8l-3-4M54 8l3-4"/>
-            <circle cx="16" cy="30" r="4"/><path d="M16 34l3 9h-9M19 43l-1 8M16 36l5-6M16 36l-1-7"/>
-            <path class="a-red" d="M46 58c-4 0-5-2-5-4l2-4-1-3a3 3 0 1 1 6 0l-1 3 2 4c0 2-1 4-3 4z"/>
-            <path class="a-gold" d="M24 20l1 2M8 18l1-2M27 30h2"/><ellipse class="a-gold" cx="16" cy="24" rx="5" ry="1.5"/></svg>
-          <span>Молитва</span></button>
-        <button class="atile" data-val="ufo" title="Жрец зовёт НЛО: прожектор поднимает фигуру, она вращается и улетает">
-          <svg viewBox="0 0 64 64"><ellipse cx="32" cy="14" rx="17" ry="5"/><path class="a-cyan" d="M24 12a8 6 0 0 1 16 0"/>
-            <path class="a-green" d="M25 19L15 58M39 19l10 39"/><path class="a-green" d="M18 58h28" stroke-dasharray="2 3"/>
-            <path class="a-red" d="M32 46c-3 0-4-2-4-3l2-3-1-2a3 3 0 1 1 6 0l-1 2 2 3c0 1-1 3-4 3z"/>
-            <path d="M23 37a10 4 0 0 0 18 0M41 37l-2 3M41 37l-3-1"/><path d="M32 32v-6M29 28l3-3 3 3"/></svg>
-          <span>НЛО</span></button>
-        <button class="atile" data-val="lightning" title="Жрец призывает молнию, на клетке остаётся чёрный след">
-          <svg viewBox="0 0 64 64"><path d="M18 18a7 7 0 0 1 6-9 9 9 0 0 1 17 1 6 6 0 0 1 4 11H20a5 5 0 0 1-2-3z"/>
-            <path class="a-cyan" d="M34 22l-7 13h8l-6 14 13-18h-8l5-9z"/>
-            <ellipse class="a-dark" cx="31" cy="56" rx="13" ry="3.5"/><path class="a-gray" d="M22 56l-4-1M40 56l5-2M31 59v3M27 53l-2-3M36 53l3-3"/></svg>
-          <span>Молния</span></button>
-      </div>
-      <div class="asec"><span class="fdot" style="--fc:#dc2626"></span>Демоны · Обелиск — дальняя атака</div>
-      <div class="atiles" data-key="obelisk">
-        <button class="atile" data-val="sink" title="Цель дрожит, её засасывает в доску, по поверхности расходятся красные круги">
-          <svg viewBox="0 0 64 64"><path class="a-red" d="M10 8l5-4 5 4v20h-10z"/><path class="a-red" d="M22 14l8 6M24 22l9 2" stroke-dasharray="2 3"/>
-            <path d="M38 22c-3 0-4-2-4-3l2-3-1-2a3 3 0 1 1 6 0l-1 2 2 3c0 1-1 3-4 3z"/><path d="M31 18l-2-1M47 18l2-1M31 24l-2 1M47 24l2 1"/>
-            <path d="M38 30v8M35 35l3 3 3-3"/>
-            <ellipse class="a-red" cx="38" cy="48" rx="7" ry="2"/><ellipse class="a-red" cx="38" cy="48" rx="15" ry="4.5"/><ellipse class="a-red" cx="38" cy="48" rx="23" ry="7" stroke-dasharray="3 3"/></svg>
-          <span>Трясина</span></button>
-      </div>
-      <div class="ahint">Выбранная анимация срабатывает при дальней атаке фигуры (2-е нажатие на неё). Анимации других фигур появятся позже.</div>
-    </div>
-
-    <!-- сверху по центру: виды камеры и строка состояния -->
-    <div id="hudTC">
-      <div id="views">
-        <button data-preset="iso" class="vbtn on" title="Изометрия (1)" aria-label="Изометрия"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg></button>
-        <button data-preset="angled" class="vbtn" title="Под углом (2)" aria-label="Под углом"><svg viewBox="0 0 24 24"><path d="M7 6h10l4 13H3z"/><path d="M12 6v13M5 12.5h14"/></svg></button>
-        <button data-preset="top" class="vbtn" title="Сверху (3)" aria-label="Сверху"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><path d="M12 4v16M4 12h16"/></svg></button>
-      </div>
+    <div class="left">
       <div id="banner"></div>
-      <div id="toast" class="hidden"></div>
+      <div id="board"></div>
+      <div id="legend"></div>
     </div>
-
-    <!-- справа вверху: карточка выбранной фигуры -->
-    <button id="pieceBtn" class="hudbtn hidden" title="Описание фигуры" aria-label="Описание фигуры"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></button>
-    <div id="piecePanel" class="hudpanel hidden"><button id="pieceClose" class="xbtn" aria-label="Закрыть">✕</button><div id="info"></div><div id="legend"></div></div>
-
-    <!-- снизу слева: игроки -->
-    <div id="players"></div>
+    <div class="right">
+      <div id="players"></div>
+      <div class="panel"><div id="info"></div></div>
+      <div class="panel logp"><h3>Журнал</h3><div id="log"></div></div>
+      <div class="btns"><button id="undoBtn" title="Ctrl+Z">↶ Ход назад</button><button id="redoBtn" title="Ctrl+Y">↷ Ход вперёд</button><button class="cardsBtn">📖 Справочник фигур</button><button id="rulesBtn">Правила</button><button id="newGame">Новая игра</button></div>
+    </div>
   </div>
 
   <div id="cards" class="hidden">
@@ -145,16 +69,15 @@
   <div id="modal" class="overlay hidden"><div class="modalbox"><div id="modalText"></div><div id="modalBtns"></div></div></div>
   <div id="tip" class="hidden"></div>
 
-  <script>window.FC = { VIEW: 'gl' };</script>
   <script src="js/engine.js"></script>
   <script src="js/factions/humans.js"></script>
   <script src="js/factions/orcs.js"></script>
   <script src="js/factions/demons.js"></script>
   <script src="js/factions/undead.js"></script>
+  <script src="js/factions/dwarves.js"></script>
+  <script src="js/factions/elves.js"></script>
+  <script src="js/factions/chthon.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/ui.js"></script>
-  <script type="importmap">{ "imports": { "three": "./js/vendor/three.module.min.js" } }</script>
-  <script type="module" src="js/gl/board3d.js"></script>
-  <script src="js/mobile.js"></script>
 </body>
 </html>
