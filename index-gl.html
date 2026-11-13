@@ -38,6 +38,7 @@
       </div>
     </div>
     <button id="startBtn" class="big">Бросить монету и начать</button>
+    <div class="tutorRow"><button id="onlineBtn" class="big">🌐 Онлайн-игра<small>с другом на разных устройствах — по ссылке или коду комнаты</small></button></div>
     <div class="tutorRow"><button id="tutorBtn" class="big">🎓 Обучение с ботом<small>вы — Белые (Игрок 1), бот — Чёрные; его ферзь объясняет каждый ход</small></button></div>
     <p><button class="cardsBtn">📖 Справочник фигур</button> <a class="viewlink" href="index3d.html">Упрощённый 3D-вид →</a> <a class="viewlink" href="index.html">2D-вид →</a></p>
     <p class="hint">Цель — поставить мат вражескому лидеру. 1-е нажатие на фигуру — обычные ходы, 2-е — особые способности.</p>
@@ -231,6 +232,8 @@
   <script src="js/factions/chthon.js"></script>
   <script src="js/ai.js"></script>
   <script src="js/tutor.js"></script>
+  <script src="js/vendor/peerjs.min.js"></script>
+  <script src="js/net.js"></script>
   <script src="js/ui.js"></script>
   <script type="importmap">{ "imports": { "three": "./js/vendor/three.module.min.js" } }</script>
   <script type="module" src="js/gl/board3d.js"></script>

@@ -206,3 +206,13 @@ button:disabled { opacity: .45; cursor: default; }
 #shiftPad .sp-b button { flex: 1; padding: 6px 4px; }
 #shiftPad .sp-b button:disabled { opacity: .4; }
 @media (max-width: 700px) { #shiftPad { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); transform: none; width: 190px; } }
+
+/* онлайн-игра (js/net.js, окно «Онлайн-игра» в js/ui.js) */
+.onl-l { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; text-align: left; font-size: 14px; }
+.onl-l select, .onl-l input { padding: 8px 10px; border-radius: 8px; border: 1px solid #4b5563; background: #111827; color: #e5e7eb; font-size: 15px; }
+.onl-l input { text-transform: uppercase; letter-spacing: 3px; }
+.onl-code { font-size: 1.3em; letter-spacing: 4px; color: #fbbf24; }
+.onl-link { width: 100%; box-sizing: border-box; padding: 8px; border-radius: 8px; border: 1px solid #4b5563; background: #111827; color: #93c5fd; font-size: 13px; }
+.onl-wait { animation: onlPulse 1.6s ease-in-out infinite; }
+@keyframes onlPulse { 50% { opacity: .45; } }
+.netme { color: #4ade80; }

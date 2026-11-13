@@ -3,6 +3,7 @@
 (function (FC) {
   const $ = id => document.getElementById(id);
   let G = null, sel = null, ctx = null, ai = [false, false], busy = false, specialHint = 0;
+  let net = null;          // сетевая партия: { side } — сторона этого устройства; ходы соперника приходят через FC.Net
   let tutorMode = false;   // режим обучения: бот (Чёрные) объясняет свои ходы в окне наставника
   let threatCache = { key: '', val: [false, false] };
 
@@ -32,7 +33,9 @@
       descFaction(i);
     }
     $('startBtn').onclick = () => { tutorMode = false; startGame(); };
-    if ($('tutorBtn')) $('tutorBtn').onclick = () => { tutorMode = true; $('ai0').checked = false; $('ai1').checked = true; startGame(); };
+    if ($('onlineBtn')) $('onlineBtn').onclick = () => onlineMenu();
+    { const m = /[?&]room=([A-Za-z0-9]+)/.exec(location.search); if (m) setTimeout(() => onlineMenu(m[1]), 0); }   // ссылка-приглашение
+    if ($('tutorBtn')) $('tutorBtn').onclick =() => { tutorMode = true; $('ai0').checked = false; $('ai1').checked = true; startGame(); };
     if ($('tutorHead')) $('tutorHead').onclick = () => {
       const t = $('tutor'); t.classList.toggle('min'); t.classList.remove('unread');
       $('tutorMin').textContent = t.classList.contains('min') ? '+' : '–';
@@ -204,13 +207,20 @@
     tutorSay(FC.Tutor.intro(G, TUTOR_SIDE), 'sys');
   }
 
-  function toSetup() { G = null; busy = false; sel = null; ctx = null; closeMenu(); setPanel(false); if ($('tutor')) $('tutor').classList.add('hidden'); if ($('pieceBtn')) $('pieceBtn').classList.add('hidden'); $('game').classList.add('hidden'); $('setup').classList.remove('hidden'); }
+  function toSetup() {
+    if (FC.Net) { if (net) FC.Net.send({ t: 'bye' }); setTimeout(() => { if (!net && !onlineRole) FC.Net.stop(); }, 300); }
+    net = null; onlineRole = null; netQueue.length = 0;
+    G = null; busy = false; sel = null; ctx = null; closeMenu(); setPanel(false); if ($('tutor')) $('tutor').classList.add('hidden'); if ($('pieceBtn')) $('pieceBtn').classList.add('hidden'); $('game').classList.add('hidden'); $('setup').classList.remove('hidden'); }
 
-  function startGame() {
-    G = new FC.Game($('f0').value, $('f1').value);
-    ai = [$('ai0').checked, $('ai1').checked];
+  // online: { f0, f1, first, side } — сетевая партия (side — за какую сторону играет это устройство)
+  function startGame(online) {
+    net = online ? { side: online.side } : null;
+    if (!online) FC.Net && FC.Net.stop();
+    G = new FC.Game(online ? online.f0 : $('f0').value, online ? online.f1 : $('f1').value);
+    ai = online ? [false, false] : [$('ai0').checked, $('ai1').checked];
+    if (online) tutorMode = false;
     sel = null; ctx = null; busy = false;
-    const first = Math.random() < 0.5 ? 0 : 1;
+    const first = online ? online.first : Math.random() < 0.5 ? 0 : 1;
     // 3D-поле: сначала открывается доска, и монетку подбрасывают прямо над ней
     if (FC.GL && FC.GL.coinToss) {
       closeMenu(); $('setup').classList.add('hidden'); $('game').classList.remove('hidden');
@@ -222,9 +232,10 @@
         if (game !== G) return;                           // за это время начали новую партию
         busy = false;
         G.log(`Бросок монеты: первыми ходят ${FC.COLOR_NAME[first]}`);
-        toast(`Выпало «${first ? 'Ч' : 'Б'}» — первыми ходят ${FC.COLOR_NAME[first]} (${G.faction(first).name})`, '🪙');
+        toast(`Выпало «${first ? 'Ч' : 'Б'}» — первыми ходят ${FC.COLOR_NAME[first]} (${G.faction(first).name})` +
+          (net ? `. Вы играете за ${FC.COLOR_NAME[net.side]}${first === net.side ? ' — ваш ход' : ''}` : ''), '🪙');
         tutorStart();
-        render(); maybeAI();
+        render(); maybeAI(); flushNet();
       });
       return;
     }
@@ -277,9 +288,13 @@
     if (!G || G.winner != null || busy) return;
     if (linePrev) { clearPreview(); render(); return; }        // нажатие на доску во время предпросмотра — отмена
     const pend = G.nextPending();
+    if (net && (pend ? pend.owner : G.turn) !== net.side) {      // сетевая партия: сейчас действует соперник
+      if (G.at(x, y)) toast('Сейчас ход соперника — дождитесь его хода', '⏳');
+      return;
+    }
     if (pend) {
       if (ai[pend.owner]) return;
-      if (pend.kind === 'cells') { const c = pend.cells.find(c => c.x === x && c.y === y); if (c) { G.resolvePending(c); afterAction(); } }
+      if (pend.kind === 'cells') { const c = pend.cells.find(c => c.x === x && c.y === y); if (c) resolveLocal(pend, pend.cells.indexOf(c)); }
       return;
     }
     // сдвиг линий (ТХ'Зсал, Ксал'Таргон): нажатие на клетку выбирает её линии, дальше — джойстик справа
@@ -494,7 +509,158 @@
   }
   function exec(a) {
     if (tutorMode && !ai[G.turn]) { try { const r = FC.Tutor.reviewPlayer(G, G.turn, a); if (r) tutorSay(r, 'player'); } catch (e) { } }
+    if (net) {                                               // сетевая партия: отправить ход сопернику
+      if (G.turn !== net.side || G.nextPending()) return;
+      const m = netRef(a);
+      if (!m) { toast('Ход не удалось передать сопернику'); return; }
+      if (!FC.Net.send(m)) { toast('Нет связи с соперником — ход не сделан'); return; }
+    }
     setAnim(a); record(a); G.doAction(a); sel = null; ctx = null; afterAction();
+  }
+  // выбор в ожидании (клетка призыва, вариант из списка): применить у себя и сообщить сопернику
+  function resolveLocal(pend, i) {
+    const list = pend.kind === 'cells' ? pend.cells : pend.options;
+    if (net) { if (pend.owner !== net.side) return; FC.Net.send({ t: 'pend', i, h: syncKey() }); }
+    G.resolvePending(list[i]); afterAction();
+  }
+
+  /* ---------- сетевая партия: ходы передаются как «ссылка» на действие, соперник находит то же действие у себя ---------- */
+  // правила детерминированы, поэтому у обоих устройств одинаковые списки допустимых действий
+  const actSig = a => JSON.stringify([a.kind, a.x, a.y, a.from, a.label, a.dir, a.dist, a.part, a.alt, a.line, a.revive]);
+  const syncKey = () => [G.turnNo, G.turn, G.history.length, G.queue.length].join(':');
+  function actList(sx, sy) {
+    const r = [];
+    if (sx != null && G.at(sx, sy)) for (const m of ['normal', 'special']) r.push(...G.legalActionsFor(sx, sy, m).acts);
+    return r;
+  }
+  function netRef(a) {
+    const sig = actSig(a), sx = sel ? sel.x : null, sy = sel ? sel.y : null;
+    let list = actList(sx, sy), src = [sx, sy];
+    if (!list.some(b => actSig(b) === sig)) { list = G.allActions(G.turn); src = null; }
+    const same = list.filter(b => actSig(b) === sig);
+    if (!same.length) return null;
+    return { t: 'act', src, sig, n: Math.max(0, same.findIndex(b => b === a)), h: syncKey() };
+  }
+  function netFind(m) {
+    const list = m.src ? actList(m.src[0], m.src[1]) : G.allActions(G.turn);
+    const same = list.filter(b => actSig(b) === m.sig);
+    return same[m.n] || same[0] || null;
+  }
+  function netDesync() {
+    busy = true;
+    modal('<h2>Партия рассинхронизировалась</h2><p>Позиции на устройствах разошлись (возможно, у одного из игроков старая версия игры — обновите страницу). Начните новую онлайн-игру.</p>',
+      [{ label: 'В меню', fn: () => { FC.Net.stop(); net = null; toSetup(); } }], true);
+  }
+  function onNet(e) {
+    if (e.type === 'close') {
+      if (net && G) { netLost(); return; }
+      onlineWaitClosed('Соединение закрыто.'); return;
+    }
+    if (e.type === 'error') {
+      if (net && G) { toast(e.text); return; }
+      onlineWaitClosed(e.text); return;
+    }
+    if (e.type === 'code') { onlineShowCode(e.code); return; }
+    if (e.type === 'open') { if (onlineRole === 'guest') FC.Net.send({ t: 'hello', f: onlinePick, v: NET_V }); return; }
+    if (e.type !== 'msg') return;
+    const m = e.data;
+    if (m.t === 'busy') { onlineWaitClosed('В этой комнате уже идёт игра.'); return; }
+    if (m.t === 'hello' && onlineRole === 'host' && !net) {
+      if (m.v !== NET_V) { FC.Net.send({ t: 'ver' }); onlineWaitClosed('У друга другая версия игры — пусть обновит страницу.'); return; }
+      const start = { t: 'start', f0: onlinePick, f1: m.f, first: Math.random() < 0.5 ? 0 : 1, v: NET_V };
+      FC.Net.send(start);
+      $('modal').classList.add('hidden');
+      startGame(Object.assign({ side: 0 }, start));
+      return;
+    }
+    if (m.t === 'ver') { onlineWaitClosed('У вас и у друга разные версии игры — обновите страницу.'); return; }
+    if (m.t === 'start' && onlineRole === 'guest' && !net) {
+      $('modal').classList.add('hidden');
+      startGame({ f0: m.f0, f1: m.f1, first: m.first, side: 1 });
+      return;
+    }
+    if (m.t === 'bye') { if (net && G) netLost(true); return; }
+    if (!net || !G) return;
+    if (m.t === 'act' || m.t === 'pend') {
+      if (busy) { netQueue.push(m); return; }           // ещё летит монетка — применим, когда закончится
+      applyRemote(m);
+    }
+  }
+  const netQueue = [];
+  function applyRemote(m) {
+    const pend = G.nextPending();
+    if (m.h !== syncKey() || (pend ? pend.owner : G.turn) === net.side) { netDesync(); return; }
+    if (m.t === 'act') {
+      if (pend) { netDesync(); return; }
+      const a = netFind(m);
+      if (!a) { netDesync(); return; }
+      clearPreview(); $('modal').classList.add('hidden');
+      setAnim(a); record(a); G.doAction(a); sel = null; ctx = null; afterAction();
+    } else {
+      const list = pend && (pend.kind === 'cells' ? pend.cells : pend.options);
+      if (!list || !list[m.i]) { netDesync(); return; }
+      G.resolvePending(list[m.i]); afterAction();
+    }
+  }
+  function flushNet() { while (netQueue.length && net && G && !busy) applyRemote(netQueue.shift()); }
+  function netLost(left) {
+    if (!net) return;
+    net = null; ai = [false, false]; onlineRole = null; netQueue.length = 0; FC.Net.stop();
+    busy = false; render();
+    if (G.winner != null) { toast(left ? 'Соперник вышел из игры' : 'Соединение с соперником закрыто', '🔌'); return; }
+    modal(`<h2>${left ? 'Соперник вышел из игры' : 'Связь с соперником потеряна'}</h2><p>Можно доиграть партию на этом устройстве (ходы за обе стороны) или вернуться в меню.</p>`,
+      [{ label: 'В меню', fn: toSetup }, { label: 'Доиграть здесь' }], true);
+  }
+
+  /* ---------- экран «Онлайн-игра»: создать комнату или войти по коду ---------- */
+  const NET_V = 1;                                           // версия протокола: у обоих игроков должна совпадать
+  let onlineRole = null, onlinePick = null;
+  const facOptions = sel0 => Object.keys(FC.FACTIONS).map(id => `<option value="${id}"${id === sel0 ? ' selected' : ''}>${FC.FACTIONS[id].name}</option>`).join('');
+  function onlineMenu(code) {
+    if (!FC.Net || !window.Peer) { modal('Сетевая игра недоступна: не загрузилась библиотека соединения.', [{ label: 'Закрыть' }]); return; }
+    code = FC.Net.norm(code);
+    modal(`<h2>🌐 Онлайн-игра</h2>
+      <p class="small">Играйте с другом на разных устройствах. Один создаёт комнату и отправляет ссылку, второй открывает её.</p>
+      <label class="onl-l">Ваша фракция <select id="onlFac">${facOptions($('f0').value)}</select></label>
+      ${code ? `<p>Приглашение в комнату <b class="onl-code">${code}</b></p>`
+        : `<label class="onl-l">Код комнаты друга <input id="onlCode" maxlength="8" placeholder="например, K7Q2M" autocomplete="off"></label>`}`,
+      (code ? [{ label: '▶ Подключиться', cls: 'k-special', fn: () => onlineJoin(code) }]
+        : [{ label: '＋ Создать комнату', cls: 'k-special', fn: onlineHost }, { label: '→ Войти по коду', fn: () => onlineJoin(FC.Net.norm($('onlCode').value)) }])
+        .concat([{ label: 'Отмена', fn: () => clearRoomParam() }]), true);
+  }
+  function clearRoomParam() { if (/[?&]room=/.test(location.search)) history.replaceState(null, '', location.pathname); }
+  function onlineHost() {
+    onlinePick = $('onlFac').value; onlineRole = 'host';
+    modal('<h2>🌐 Создаём комнату…</h2><p class="small">Подключение к серверу соединения</p>', [{ label: 'Отмена', fn: onlineCancel }], true);
+    FC.Net.host(onNet);
+  }
+  function onlineShowCode(code) {
+    const link = FC.Net.link(code);
+    modal(`<h2>🌐 Комната ${code}</h2>
+      <p>Вы играете <b>Белыми</b> (${FC.FACTIONS[onlinePick].name}). Отправьте другу ссылку — или код <b class="onl-code">${code}</b>:</p>
+      <p><input id="onlLink" class="onl-link" readonly value="${link}"></p>
+      <p class="small onl-wait">⏳ Ждём соперника… Не закрывайте эту страницу.</p>`,
+      [{ label: '📋 Копировать ссылку', keep: true, fn: () => copyLink(link) }].concat(navigator.share ? [{ label: '📤 Поделиться', keep: true, fn: () => navigator.share({ title: 'Fraction Chess', text: 'Сыграем в Fraction Chess? Комната ' + code, url: link }).catch(() => { }) }] : [])
+        .concat([{ label: 'Отмена', fn: onlineCancel }]), true);
+    const inp = $('onlLink'); if (inp) inp.onclick = () => inp.select();
+  }
+  function copyLink(link) {
+    const ok = () => toast('Ссылка скопирована', '📋');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(ok, () => { $('onlLink').select(); document.execCommand('copy'); ok(); });
+    else { $('onlLink').select(); document.execCommand('copy'); ok(); }
+  }
+  function onlineJoin(code) {
+    if (!code || code.length < 4) { toast('Введите код комнаты'); onlineMenu(); return; }
+    onlinePick = $('onlFac').value; onlineRole = 'guest';
+    clearRoomParam();
+    modal(`<h2>🌐 Подключение к комнате ${code}…</h2><p class="small">Вы будете играть <b>Чёрными</b> (${FC.FACTIONS[onlinePick].name})</p>`, [{ label: 'Отмена', fn: onlineCancel }], true);
+    FC.Net.join(code, onNet);
+  }
+  function onlineCancel() { onlineRole = null; FC.Net.stop(); }
+  function onlineWaitClosed(text) {
+    if (!onlineRole) return;
+    onlineRole = null; FC.Net.stop();
+    modal(`<h2>🌐 Онлайн-игра</h2><p>${text}</p>`, [{ label: 'Попробовать снова', fn: () => onlineMenu() }, { label: 'Закрыть' }], true);
   }
 
   /* ---------- история ходов: только клетки, как в шахматах ---------- */
@@ -552,6 +718,10 @@
     const pend = G.nextPending();
     if (pend) {
       render();
+      if (net && pend.owner !== net.side) {                  // выбирает соперник — ждём его сообщения
+        if ($('banner')) $('banner').innerHTML = '⏳ Соперник делает выбор…';
+        return;
+      }
       if (ai[pend.owner]) {
         busy = true;
         const game = G;
@@ -560,7 +730,7 @@
           busy = false; G.resolvePending(FC.AI.resolve(G, pend)); afterAction();
         }, 500);
       } else if (pend.kind === 'options') {
-        modal(pend.text, pend.options.map(o => ({ label: o.label, fn: () => { G.resolvePending(o); afterAction(); } })), true);
+        modal(pend.text, pend.options.map((o, i) => ({ label: o.label, fn: () => resolveLocal(pend, i) })), true);
       }
       return;
     }
@@ -584,6 +754,7 @@
     }, +SET.aiPause || 450);
   }
   function undo() {
+    if (net) { toast('В онлайн-игре ход назад недоступен'); return; }
     if (!G || busy || !G.history.length) return;
     $('modal').classList.add('hidden');
     let ok = G.undo();
@@ -595,6 +766,7 @@
     maybeAI();
   }
   function redo() {
+    if (net) return;
     if (!G || busy || !G.future.length) return;
     $('modal').classList.add('hidden');
     let ok = G.redo();
@@ -611,8 +783,9 @@
     const title = w === -1 ? 'Ничья' : `Победа: ${FC.COLOR_NAME[w]} (${G.faction(w).name})`;
     tutorSay(w === TUTOR_SIDE ? `Партия за мной: ${G.winReason}. Отмени пару ходов (↶) и попробуй найти защиту — так учиться быстрее всего.`
       : w === -1 ? `Ничья: ${G.winReason}.` : `Ты победил! ${G.winReason}. Отличная партия!`, 'sys');
-    modal(`<h2>${title}</h2><p>${G.winReason}</p>`,
-      [{ label: 'Новая игра', fn: toSetup }, { label: '↶ Отменить последний ход', fn: undo }, { label: 'Посмотреть доску' }], true);
+    const you = net ? (w === -1 ? '' : w === net.side ? '<p><b>Вы победили!</b></p>' : '<p>Победил соперник.</p>') : '';
+    modal(`<h2>${title}</h2>${you}<p>${G.winReason}</p>`,
+      [{ label: 'Новая игра', fn: toSetup }].concat(net ? [] : [{ label: '↶ Отменить последний ход', fn: undo }]).concat([{ label: 'Посмотреть доску' }]), true);
   }
 
   /* ---------- модальное окно ---------- */
@@ -622,7 +795,7 @@
     for (const b of buttons) {
       const el = document.createElement('button');
       el.textContent = b.label; if (b.cls) el.className = b.cls;
-      el.onclick = () => { $('modal').classList.add('hidden'); if (b.fn) b.fn(); };
+      el.onclick = () => { if (!b.keep) $('modal').classList.add('hidden'); if (b.fn) b.fn(); };
       box.appendChild(el);
     }
     $('modal').classList.remove('hidden');
@@ -635,7 +808,7 @@
     if (threatCache.key !== key) threatCache = { key, val: [G.leaderThreatened(0), G.leaderThreatened(1)] };
     return threatCache.val;
   }
-  function render() { renderBoard(); renderPad(); renderBanner(); renderPlayers(); renderInfo(); renderLog(); $('undoBtn').disabled = !G.history.length; $('redoBtn').disabled = !G.future.length; if (FC.UI.onRender) FC.UI.onRender(G, ai); }
+  function render() { renderBoard(); renderPad(); renderBanner(); renderPlayers(); renderInfo(); renderLog(); $('undoBtn').disabled = !!net || !G.history.length; $('redoBtn').disabled = !!net || !G.future.length; if (FC.UI.onRender) FC.UI.onRender(G, ai); }
 
   const KIND_ORDER = ['convert', 'revive', 'summon', 'ranged', 'capture', 'special', 'move', 'zone'];
   const IS3D = FC.VIEW === '3d';
@@ -846,7 +1019,8 @@
     const th = threats();
     let s = `<b>Ход ${G.turnNo}</b> · ходят <span class="pc o${G.turn}">${FC.COLOR_NAME[G.turn]}</span> (${G.faction(G.turn).name})`;
     if (ai[G.turn]) s += ' · <i>думает компьютер…</i>';
-    if (pend) s = `<span class="pend">⚑ ${FC.COLOR_NAME[pend.owner]}: ${pend.text}</span>`;
+    if (net) s = '🌐 ' + s + (G.turn === net.side ? ' · <b class="netme">ваш ход</b>' : ' · <i>ход соперника…</i>');
+    if (pend) s =`<span class="pend">⚑ ${FC.COLOR_NAME[pend.owner]}: ${pend.text}</span>`;
     if (G.winner == null && G.players[G.turn].reviveDue) s += ' <span class="pend">· Король демонов пал: Призыватель должен принести жертву (2-е нажатие на Призывателя)</span>';
     if (th[G.turn] && G.winner == null) s += ' <span class="warn">⚠ ШАХ! Уведите лидера, закройтесь или уничтожьте атакующего (в том числе особой атакой)</span>';
     if (G.winner == null) {
@@ -1048,7 +1222,7 @@
 
   window.addEventListener('DOMContentLoaded', init);
   FC.UI = {
-    get G() { return G; }, get ai() { return ai; }, onRender: null,
+    get G() { return G; }, get ai() { return ai; }, get netSide() { return net ? net.side : null; }, onRender: null,
     // для WebGL-поля: клик, наведение и снятие выбора по координатам клетки
     click: (x, y) => { if (performance.now() < swallowUntil) return; onCell(x, y); },
     hover: (x, y, cx, cy) => hoverAt(x, y, cx, cy),

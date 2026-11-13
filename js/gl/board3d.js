@@ -1194,6 +1194,7 @@ let preset = 'iso', rot = 0, camMode = readMode(), tween = null;
 function viewSide() {
   const G = FC.UI.G, ai = FC.UI.ai || [false, false];
   if (!G) return 0;
+  if (FC.UI.netSide != null) return FC.UI.netSide;   // онлайн-игра — всегда со своей стороны
   if (ai[0] !== ai[1]) return ai[0] ? 1 : 0;   // против компьютера — всегда со стороны человека
   return camMode === 'turn' ? G.turn : 0;
 }
