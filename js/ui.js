@@ -75,9 +75,10 @@
   }
   /* ---------- настройки (хранятся в localStorage как fc.set; читает и js/gl/board3d.js) ---------- */
   const SET_DEF = { mm: true, mmOp: 85, mmSize: 'm', hist: true, histOp: 85, tips: true, view: 'iso', train: false, trThreat: true, trDef: false,
-    animSpeed: '1', aiDepth: '3', aiPause: '700', lineConfirm: true };
+    animSpeed: '1', aiDepth: '5', aiPause: '700', lineConfirm: true, aiV: 2 };
   const SET = FC.SET = Object.assign({}, SET_DEF, (() => { try { return JSON.parse(store.get('fc.set') || '{}'); } catch (e) { return {}; } })());
   function saveSet() { store.set('fc.set', JSON.stringify(SET)); }
+  if (SET.aiV !== 2) { SET.aiDepth = '5'; SET.aiV = 2; saveSet(); }   // новый ИИ: по умолчанию — «Мастер»
   function applySet() {
     const tl = $('hudTL') && $('game');                     // размер карты нужен и меню/настройкам (они открываются справа от неё)
     if (tl) { tl.classList.remove('mm-s', 'mm-l'); if (SET.mmSize !== 'm') tl.classList.add('mm-' + SET.mmSize); }
@@ -745,16 +746,20 @@
   function maybeAI() {
     if (!G || G.winner != null || !ai[G.turn]) return;
     busy = true;
-    const game = G, turnNo = G.turnNo;
+    const game = G, turnNo = G.turnNo, t0 = performance.now(), pause = +SET.aiPause || 450;
+    const still = () => game === G && G.turnNo === turnNo && G.winner == null;
+    // компьютер начинает думать сразу (в отдельном потоке), а ходит не раньше выбранной паузы
     setTimeout(() => {
-      busy = false;
-      if (game !== G || G.turnNo !== turnNo || G.winner != null) return;
-      const a = FC.AI.choose(G, G.turn);
-      if (a) {
-        if (tutorMode && G.turn === TUTOR_SIDE) { try { tutorSay(FC.Tutor.explainBot(G, G.turn, a).html, 'bot'); } catch (e) { console.warn('tutor', e); } }
-        setAnim(a); record(a); G.doAction(a); afterAction();
-      }
-    }, +SET.aiPause || 450);
+      if (!still()) { busy = false; return; }
+      FC.AI.chooseAsync(G, G.turn).then(a => {
+        setTimeout(() => {
+          busy = false;
+          if (!still() || !a) return;
+          if (tutorMode && G.turn === TUTOR_SIDE) { try { tutorSay(FC.Tutor.explainBot(G, G.turn, a).html, 'bot'); } catch (e) { console.warn('tutor', e); } }
+          setAnim(a); record(a); G.doAction(a); afterAction();
+        }, Math.max(0, pause - (performance.now() - t0)));
+      });
+    }, 30);
   }
   function undo() {
     if (net) { toast('В онлайн-игре ход назад недоступен'); return; }

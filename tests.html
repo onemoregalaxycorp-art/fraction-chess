@@ -14,7 +14,7 @@
   <script src="js/factions/chthon.js"></script>
 <script src="js/ai.js"></script>
 <script>
-FC.AI.depth = 1;   // массовые партии — быстрая оценка на 1 ход (поиск на 3 хода проверяется отдельным тестом)
+FC.AI.depth = 1;   // массовые партии — быстрая оценка на 1 ход (поиск вперёд проверяется отдельными тестами)
 
 const GAMES = 2, MAX_PLIES = 200;
 const ids = Object.keys(FC.FACTIONS);
