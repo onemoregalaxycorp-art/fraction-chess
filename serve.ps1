@@ -1,9 +1,10 @@
 # Простой локальный сервер для предпросмотра (игру можно открыть и двойным кликом по index.html)
+param([int]$Port = 8765)
 $root = $PSScriptRoot
 $l = New-Object System.Net.HttpListener
-$l.Prefixes.Add('http://localhost:8765/')
+$l.Prefixes.Add("http://localhost:$Port/")
 $l.Start()
-Write-Host 'Serving on http://localhost:8765/'
+Write-Host "Serving on http://localhost:$Port/"
 $types = @{ '.html'='text/html; charset=utf-8'; '.js'='text/javascript; charset=utf-8'; '.css'='text/css; charset=utf-8'; '.md'='text/plain; charset=utf-8'; '.glb'='model/gltf-binary'; '.json'='application/json' }
 while ($l.IsListening) {
   $ctx = $l.GetContext()

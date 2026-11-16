@@ -337,10 +337,28 @@
         a.controlled = true;
         a.label = `[под контролем] ${a.label}`;
         a.apply = g => {
-          const q0 = g.queue.length;
+          const q0 = g.queue.length, id0 = g.nextId;
+          const mind = p.mind === side, inf = p.infBy && p.infBy.side === side ? p.infBy : null;
           ap(g);
-          if (p.mind === side) { p.mind = null; g.log(`Контроль разума над ${g.who(p)} снят`); }
-          if (p.infBy && p.infBy.side === side) {
+          // существа, призванные захваченной фигурой: под контролем разума — достаются Хтони,
+          // от заражённой — появляются заражёнными плотью (короли и лидеры остаются у владельца)
+          const born = g.allPieces().filter(o => o.p.id >= id0 && o.p.owner !== side);
+          for (const o of born) {
+            const L = g.leader(o.p.owner);
+            if (g.def(o.p).royal || (L && L.p === o.p)) continue;
+            if (inf) { o.p.infBy = { side, flesh: inf.flesh }; o.p.mind = null; g.log(`${g.who(o.p)} появляется заражённым плотью — им управляют Аберрации`); }
+            else if (mind) { g.log(`${g.who(o.p)} призван под контролем разума и переходит к Аберрациям`); o.p.owner = side; o.p.mind = null; if (o.p.dir) o.p.dir = -o.p.dir; }
+          }
+          if (mind) { p.mind = null; g.log(`Контроль разума над ${g.who(p)} снят`); }
+          if (inf && born.length) {                               // заражённый призыватель гибнет вместе с плотью внутри
+            const at = g.find(p.id);
+            if (at) {
+              g.queue.length = q0;
+              g.board[at.y][at.x] = null;
+              g.log(`Заражённая фигура ${g.who(p)} отдаёт силы на призыв и гибнет вместе с плотью внутри`);
+              g.onRemoved(p, at.x, at.y, null, {});
+            }
+          } else if (p.infBy && p.infBy.side === side) {
             const at = g.find(p.id);
             const moved = at && (at.x !== x || at.y !== y);
             if (at && moved) {

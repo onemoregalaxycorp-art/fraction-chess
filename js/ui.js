@@ -614,7 +614,7 @@
   }
 
   /* ---------- экран «Онлайн-игра»: создать комнату или войти по коду ---------- */
-  const NET_V = 1;                                           // версия протокола: у обоих игроков должна совпадать
+  const NET_V = 2;                                           // версия протокола: у обоих игроков должна совпадать
   let onlineRole = null, onlinePick = null;
   const facOptions = sel0 => Object.keys(FC.FACTIONS).map(id => `<option value="${id}"${id === sel0 ? ' selected' : ''}>${FC.FACTIONS[id].name}</option>`).join('');
   function onlineMenu(code) {
