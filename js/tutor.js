@@ -103,7 +103,7 @@
 
     // зачем
     if (s.win || s.mate) why.push('<b>Это победа!</b> ' + (s.mate ? 'Мат: твоему лидеру некуда уйти.' : 'Твой лидер уничтожен.'));
-    if (s.stalemate) why.push('<b>Это победа!</b> Пат: у тебя не остаётся ни одного допустимого хода, а по нашим правилам пат — поражение того, кому некуда ходить.');
+    if (s.stalemate) why.push('Пат: у тебя не остаётся ни одного допустимого хода — а по нашим правилам поставивший пат проигрывает, так что это твоя победа.');
     if (enemyLost.length) {
       const pts = enemyLost.reduce((t, b) => t + (FC.PIECES[b.type].royal ? 0 : FC.VALUE[FC.PIECES[b.type].cls]), 0);
       why.push(`Забираю твою фигуру ${list(enemyLost.map(b => who(G, b)))} — это ${pts} оч. материала${ptsHint ? ' (пешка = 1, конь и слон = 3, ладья = 5, ферзь = 9)' : ''}.`);
@@ -177,7 +177,8 @@
   function reviewPlayer(G, owner, a) {
     const s = simulate(G, owner, a), opp = 1 - owner, out = [];
     const enemyLost = s.lost.filter(b => b.owner === opp);
-    if (s.win || s.mate || s.stalemate) return 'Отличный ход — это победа!' + (s.stalemate ? ' Пат: мне некуда ходить, а пат — поражение.' : '');
+    if (s.stalemate) return 'Ой: это пат — мне некуда ходить, а по нашим правилам поставивший пат проигрывает. Отмени ход (↶) и оставь мне ход.';
+    if (s.win || s.mate) return 'Отличный ход — это победа!';
     if (enemyLost.length >= 2) out.push(`Сильно: ты взял сразу ${enemyLost.length} моих фигуры.`);
     else if (enemyLost.length) out.push(`Ты забрал мою фигуру «${nm(enemyLost[0].type)}».`);
     if (s.check) out.push('Шах моему лидеру — неплохо!');

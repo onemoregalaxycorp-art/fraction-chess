@@ -1,6 +1,6 @@
 'use strict';
 /* ИИ Fraction Chess.
-   1) Быстрая оценка каждого действия «на 1 ход» (rank): материал, безопасность фигур, шах, мат и пат сопернику,
+   1) Быстрая оценка каждого действия «на 1 ход» (rank): материал, безопасность фигур, шах, мат (пат сопернику — поражение),
       наступление на лидера, уход от ничьих, план Великого механизма. Используется для порядка ходов и уровня «Обычная».
    2) Поиск на 3 или 5 полуходов вперёд (think): альфа-бета с итеративным углублением, таблицей позиций и досчётом
       взятий. Оценка позиции учитывает механики фракций (захваченные Хтонью фигуры, «жизни» Демонов, «Строй» Людей,
@@ -116,7 +116,8 @@
       // (прибавка тоже в зачёт: улучшение механизма Королевским механизмом, превращение пешки)
       else if (a.kind !== 'capture' && a.kind !== 'ranged' && a.kind !== 'convert' && !a.merge && !a.split) s += dOwn;
       // продвинуть свой план Великого механизма / сорвать план соперника-Дварфов
-      if (plan0 || oppPlan0 || G.players[owner].faction === 'dwarves') s += (dwarfPlan(G, owner) - plan0) + (oppPlan0 - dwarfPlan(G, opp)) * 0.8;
+      // (Великий механизм — лишь один из путей к победе: план весит меньше, чем материал и атака на лидера)
+      if (plan0 || oppPlan0 || G.players[owner].faction === 'dwarves') s += ((dwarfPlan(G, owner) - plan0) + (oppPlan0 - dwarfPlan(G, opp)) * 0.8) * 0.5;
       const T = G.threatSquares(opp);
       const f = G.find(pid);
       // своя фигура исчезла после собственного хода (механизм разрушился после взятия и т. п.) — это потеря
@@ -140,8 +141,9 @@
       if (G.winner == null) {
         const check = G.leaderThreatened(opp);
         if (check) s += 1.5;
-        // мат или пат в один ход: у соперника не останется ни одного допустимого хода — это победа
-        if (G.queue.length === 0 && !hasAnyMove(G, opp)) s += 10000;
+        // у соперника не останется ни одного допустимого хода: под шахом — это мат (победа),
+        // без шаха — пат, а поставивший пат проигрывает
+        if (G.queue.length === 0 && !hasAnyMove(G, opp)) s += check ? 10000 : -10000;
         // наступление: фигуры (кроме пешек и лидера) подбираются к вражескому лидеру
         const L = G.leader(opp);
         if (L && f && L0 && !md.royal && md.cls !== 'pawn') s += (dist(from, L0) - dist(f, L)) * 0.12;
@@ -181,6 +183,17 @@
     if (rw) for (const { p } of G.pieces(s)) if (G.def(p).royal || p.type === F.heir) w += rw;
     return w;
   }
+  /* Дварфы: Великий механизм — не единственный путь к победе. Собранный механизм почти выигрывает (+30),
+     а подготовка к нему (продвижение механических пешек, механический ферзь, Королевский механизм) ограничена
+     и весит меньше, когда Дварфы и так впереди по материалу: тогда выгоднее давить на лидера и ставить мат. */
+  function planScore(G, s) {
+    const plan = dwarfPlan(G, s);
+    if (!plan) return 0;
+    const gm = G.pieces(s).some(o => o.p.type === 'great_mech') ? 1 : 0;
+    const prep = Math.min(plan - gm * 60, 6);
+    const ahead = material(G, s) - material(G, 1 - s);
+    return gm * 30 + prep * (ahead >= 3 ? 0.15 : 0.3);
+  }
   // фигуры Хтони со сдвигом линий: десятки вариантов «Искажения» — в оценке подвижности их не перебираем
   const SHIFTERS = new Set(['tx', 'xal']);
   // сырые (без проверки шаха) действия стороны; forEval — для подсчёта подвижности (без дорогих сдвигов линий)
@@ -217,7 +230,7 @@
     let v = 0;
     for (const s of [side, opp]) {
       const sg = s === side ? 1 : -1, F = G.faction(s), dir = G.players[s].dir;
-      let w = material(G, s) + 0.5 * dwarfPlan(G, s);
+      let w = material(G, s) + planScore(G, s);
       const L = G.leader(s);
       for (const { p, x, y } of G.pieces(s)) {
         if (p.infBy) continue;
@@ -242,7 +255,7 @@
         const T = G.threatSquares(1 - s);
         let around = 0;
         for (const [dx, dy] of FC.ALL8) if (T.has((L.x + dx) + ',' + (L.y + dy))) around++;
-        w -= around * 0.12;
+        w -= around * 0.18;                                       // давление на лидера — путь к мату для любой фракции
         if (T.has(L.x + ',' + L.y)) w -= 0.4;
       }
       v += sg * w;
@@ -346,7 +359,8 @@
         break;
       }
     }
-    if (!legal) return -(WIN - ply);                                // некуда ходить: мат или пат — поражение
+    // некуда ходить: под шахом — мат (поражение); без шаха — пат, и проигрывает тот, кто его поставил
+    if (!legal) return G.leaderThreatened(side) || (G.players[side].reviveDue && !G.reviveOptions(side).raw) ? -(WIN - ply) : WIN - ply;
     S.tt.set(key, { depth, v: best, flag: best <= a0 ? 2 : best >= beta ? 1 : 0, move: bestMove && moveKey(bestMove) });
     return best;
   }

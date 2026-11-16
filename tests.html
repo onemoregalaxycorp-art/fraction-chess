@@ -290,13 +290,13 @@ const CHECKS = [
     const a4 = P.queue.length === 1 && P.at(2, 0).promoPending;
     return a1 && a2 && a3 && a4;
   }],
-  ['Пат — поражение того, кому некуда ходить', () => {
+  ['Пат — поражение того, кто его поставил', () => {
     const G = empty('humans', 'humans'); G.spawn('king', 0, 0, 0); G.spawn('king', 1, 7, 7); G.spawn('queen', 1, 1, 3);
     G.players[0].pawnSummons = 16;                     // призыв Пешек исчерпан — у белых только Король
     G.turn = 1;
     G.doAction(G.legalActionsFor(1, 3, 'normal').acts.find(a => a.x === 1 && a.y === 2));   // ферзь b4 → b3: пат
     G.endTurn();
-    return G.winner === 1 && /Пат/.test(G.winReason) && !G.leaderThreatened(0);
+    return G.winner === 0 && /Пат/.test(G.winReason) && !G.leaderThreatened(0);
   }],
   ['ИИ с поиском на 3 хода находит мат в 2 хода (две ладьи)', () => {
     const play3 = () => {
@@ -311,12 +311,12 @@ const CHECKS = [
     };
     try { return play3() && play3() && play3(); } finally { FC.AI.depth = 1; }
   }],
-  ['ИИ видит пат сопернику как победу', () => {
+  ['ИИ не ставит пат: поставивший пат проигрывает', () => {
     const G = empty('humans', 'humans'); G.spawn('king', 0, 0, 0); G.spawn('king', 1, 7, 7); G.spawn('queen', 1, 1, 3);
     G.players[0].pawnSummons = 16; G.turn = 1;
-    const a = FC.AI.choose(G, 1);
-    G.doAction(a); G.endTurn();
-    return G.winner === 1;
+    FC.AI.depth = 5;
+    try { const a = FC.AI.choose(G, 1); G.doAction(a); G.endTurn(); } finally { FC.AI.depth = 1; }
+    return G.winner !== 0;
   }],
   /* ===== Дварфы ===== */
   ['Дварфы: пешка без двойного хода, создаёт не больше 2 механических пешек', () => {

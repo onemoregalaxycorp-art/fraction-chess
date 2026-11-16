@@ -696,8 +696,8 @@
         } else if (this.leaderThreatened(t)) {
           this.winner = 1 - t; this.winReason = `Мат! Лидеру «${FC.COLOR_NAME[t]}» некуда уйти от удара`;
         } else {
-          // по правилам Fraction Chess пат — поражение того, кому некуда ходить
-          this.winner = 1 - t; this.winReason = `Пат: у «${FC.COLOR_NAME[t]}» нет допустимых ходов — пат считается поражением`;
+          // по правилам Fraction Chess пат — поражение того, кто его поставил (у кого некуда ходить — побеждает)
+          this.winner = t; this.winReason = `Пат: у «${FC.COLOR_NAME[t]}» нет допустимых ходов — поставившие пат «${FC.COLOR_NAME[1 - t]}» проигрывают`;
         }
         this.log('★ ' + this.winReason);
       }
